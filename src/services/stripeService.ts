@@ -4,8 +4,8 @@ if (!process.env.STRIPE_SECRET_KEY) {
   throw new Error('STRIPE_SECRET_KEY is not set in environment variables');
 }
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: '2024-12-18.acacia',
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+  apiVersion: '2025-11-17.clover',
 });
 
 export interface CreatePaymentIntentParams {
@@ -76,7 +76,7 @@ export const createRefund = async (
   return {
     id: refund.id,
     amount: refund.amount,
-    status: refund.status,
+    status: refund.status || 'pending',
   };
 };
 
