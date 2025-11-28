@@ -11,21 +11,25 @@ datasource db {
 }
 
 model Station {
-  id           String   @id @default(uuid())
-  name         String
-  status       String
+  id            String        @id @default(uuid())
+  name          String
+  status        String
   connectorType String
-  pricePerKwh  Float
-  transactions Transaction[]
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  pricePerKwh   Float
+  address       String?
+  city          String?
+  latitude      Float?
+  longitude     Float?
+  transactions  Transaction[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 }
 
 model Transaction {
-  id              String   @id @default(uuid())
-  stripePaymentId String   @unique
+  id              String    @id @default(uuid())
+  stripePaymentId String    @unique
   stationId       String
-  station         Station  @relation(fields: [stationId], references: [id])
+  station         Station   @relation(fields: [stationId], references: [id])
   amount          Float
   energyKwh       Float
   startTime       DateTime
@@ -34,6 +38,14 @@ model Transaction {
   refundId        String?
   finalEnergy     Float?
   finalCost       Float?
-  createdAt       DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  refundedAmount  Float?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model Connector {
+  id          String   @id @default(uuid())
+  pricePerKwh Float    @default(2.00)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

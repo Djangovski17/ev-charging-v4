@@ -109,6 +109,7 @@ function HomeContent() {
   const stationId = searchParams.get("station");
   
   // Stany
+  const [isLoading, setIsLoading] = useState(true);
   const [viewState, setViewState] = useState<ViewState>("idle");
   const [connectorId, setConnectorId] = useState<string | null>(null);
   const [amount, setAmount] = useState<number>(50);
@@ -127,18 +128,144 @@ function HomeContent() {
   const [refundAmount, setRefundAmount] = useState(0);
   const [invoiceEmail, setInvoiceEmail] = useState<string | null>(null);
   const [customerEmail, setCustomerEmail] = useState("");
+  const [stationAddress, setStationAddress] = useState<string | null>(null);
+  const [stationCity, setStationCity] = useState<string | null>(null);
+  const [connectors, setConnectors] = useState<Array<{
+    id: string;
+    name: string;
+    type: string;
+    power: string;
+    status: string;
+    icon: typeof Plug | typeof Zap | typeof BatteryCharging;
+  }>>([]);
 
   const PRICE_PER_KWH = 2.50;
 
-  const connectors = [
-    { id: '1', name: 'Złącze A', type: 'Type 2', power: '22 kW', status: 'WOLNE', icon: Plug },
-    { id: '2', name: 'Złącze B', type: 'CCS', power: '50 kW', status: 'WOLNE', icon: Zap },
-    { id: '3', name: 'Złącze C', type: 'CHAdeMO', power: '50 kW', status: 'ZAJĘTE', icon: BatteryCharging },
-  ];
+  // Mapowanie ikon dla złączy (na podstawie typu)
+  const getConnectorIcon = (type: string): typeof Plug | typeof Zap | typeof BatteryCharging => {
+    if (type.includes('CCS')) return Zap;
+    if (type.includes('CHAdeMO')) return BatteryCharging;
+    return Plug; // Type 2 i domyślnie
+  };
+
+  // Mapowanie statusu na tekst wyświetlany
+  const getStatusText = (status: string): string => {
+    switch (status) {
+      case 'CHARGING':
+        return 'Zajęte';
+      case 'OCCUPIED':
+        return 'Zajęte';
+      case 'FAULTED':
+        return 'Awaria';
+      case 'AVAILABLE':
+        return 'Wolne';
+      default:
+        return status;
+    }
+  };
 
   const selectedConnectorData = connectors.find(c => c.id === connectorId);
 
   // --- LOGIKA ---
+
+  // Pobierz dane stacji (address, city, connectors) przy mount
+  useEffect(() => {
+    if (stationId) {
+      const fetchStationData = async () => {
+        try {
+          const response = await axios.get(`${API_URL}/station/${stationId}`);
+          if (response.data.success && response.data.station) {
+            setStationAddress(response.data.station.address || null);
+            setStationCity(response.data.station.city || null);
+            
+            // Pobierz złącza z backendu i dodaj ikony
+            if (response.data.station.connectors && Array.isArray(response.data.station.connectors)) {
+              const connectorsWithIcons = response.data.station.connectors.map((connector: {
+                id: string;
+                name: string;
+                type: string;
+                power: string;
+                status: string;
+              }) => ({
+                ...connector,
+                icon: getConnectorIcon(connector.type),
+              }));
+              setConnectors(connectorsWithIcons);
+            } else {
+              // Fallback: jeśli backend nie zwraca złączy, użyj domyślnych
+              const defaultConnectors = [
+                { id: '1', name: 'Złącze A', type: 'Type 2', power: '22 kW', status: 'AVAILABLE', icon: Plug },
+                { id: '2', name: 'Złącze B', type: 'CCS', power: '50 kW', status: 'AVAILABLE', icon: Zap },
+                { id: '3', name: 'Złącze C', type: 'CHAdeMO', power: '50 kW', status: 'AVAILABLE', icon: BatteryCharging },
+              ];
+              setConnectors(defaultConnectors);
+            }
+          }
+        } catch (err) {
+          console.error("Błąd pobierania danych stacji:", err);
+        }
+      };
+      fetchStationData();
+    }
+  }, [stationId]);
+
+  // Odzyskiwanie sesji przy mount - sprawdź czy jest aktywna sesja
+  useEffect(() => {
+    if (stationId) {
+      const checkActiveSession = async () => {
+        setIsLoading(true);
+        try {
+          console.log(`[Session Recovery] Sprawdzam aktywną sesję dla stacji: ${stationId}`);
+          const response = await axios.get(`${API_URL}/stations/${stationId}/active-session`);
+          
+          console.log('Session Check:', response.data);
+          
+          if (response.data.success && response.data.data) {
+            const sessionData = response.data.data;
+            console.log(`[Session Recovery] Znaleziono aktywną sesję:`, sessionData);
+            
+            // Ustaw viewState na charging
+            setViewState("charging");
+            
+            // Zaktualizuj startTime na podstawie danych z backendu
+            if (sessionData.startTime) {
+              setSessionStartTime(new Date(sessionData.startTime));
+            }
+            
+            // Zaktualizuj amount na podstawie wpłaconej kwoty
+            if (sessionData.amount) {
+              setAmount(sessionData.amount);
+            }
+            
+            // Ustaw connectorId (domyślnie 1, zgodnie z logiką OCPP)
+            if (sessionData.connectorId) {
+              setConnectorId(sessionData.connectorId.toString());
+            } else {
+              setConnectorId("1");
+            }
+            
+            console.log(`[Session Recovery] Sesja odzyskana - viewState: charging, amount: ${sessionData.amount}, startTime: ${sessionData.startTime}`);
+          } else {
+            console.log(`[Session Recovery] Brak aktywnej sesji dla stacji: ${stationId}`);
+          }
+        } catch (err: any) {
+          // 404 oznacza brak aktywnej sesji - to jest OK
+          if (err.response?.status === 404) {
+            console.log(`[Session Recovery] Brak aktywnej sesji (404)`);
+          } else {
+            console.error("[Session Recovery] Błąd sprawdzania sesji:", err);
+          }
+        } finally {
+          setIsLoading(false);
+        }
+      };
+      
+      checkActiveSession();
+    } else {
+      // Jeśli nie ma stationId, od razu ustaw isLoading na false
+      setIsLoading(false);
+    }
+  }, [stationId]);
 
   // Socket.io do nasłuchiwania na aktualizacje energii z OCPP
   useEffect(() => {
@@ -303,6 +430,23 @@ function HomeContent() {
 
   // --- RENDEROWANIE WIDOKÓW ---
 
+  // Ekran ładowania podczas sprawdzania sesji
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center p-4 font-sans">
+        <div className="text-center space-y-6">
+          <div className="w-20 h-20 bg-emerald-100 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+            <Zap size={40} className="text-emerald-600 animate-pulse" fill="currentColor" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold text-slate-900">Łączenie ze stacją...</h2>
+            <p className="text-sm text-slate-500 font-medium">Sprawdzanie aktywnej sesji</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // 1. WYBÓR ZŁĄCZA
   if (!stationId || viewState === "idle") {
     return (
@@ -313,40 +457,63 @@ function HomeContent() {
               <Zap size={32} fill="currentColor" />
             </div>
             <h1 className="text-2xl font-extrabold text-slate-900 mb-1">Stacja {stationId || "Demo"}</h1>
-            <p className="text-slate-500 font-medium">Wybierz punkt ładowania</p>
+            {(stationAddress || stationCity) && (
+              <p className="text-slate-500 font-medium text-sm mb-2">
+                {stationAddress && <span>{stationAddress}</span>}
+                {stationAddress && stationCity && <span>, </span>}
+                {stationCity && <span>{stationCity}</span>}
+              </p>
+            )}
+            <div className="flex items-center justify-center gap-2 mt-2">
+              <button className="text-xs text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1 transition-colors">
+                <span>📍</span>
+                <span>Wybierz inny punkt</span>
+              </button>
+            </div>
+            <p className="text-slate-500 font-medium mt-3">Wybierz punkt ładowania</p>
           </div>
 
           <div className="p-6 space-y-4">
             {connectors.map((c) => {
               const Icon = c.icon;
-              const isBusy = c.status === 'ZAJĘTE';
+              // Złącze jest nieaktywne jeśli status nie jest 'AVAILABLE'
+              const isUnavailable = c.status !== 'AVAILABLE';
+              const statusText = getStatusText(c.status);
+              
               return (
                 <button
                   key={c.id}
-                  disabled={isBusy}
-                  onClick={() => handleSelectConnector(c.id)}
+                  disabled={isUnavailable}
+                  onClick={() => !isUnavailable && handleSelectConnector(c.id)}
                   className={`w-full flex items-center justify-between p-5 rounded-2xl border-2 transition-all duration-200 group text-left
-                    ${isBusy 
-                      ? 'border-slate-50 bg-slate-50 opacity-60 cursor-not-allowed grayscale' 
+                    ${isUnavailable 
+                      ? 'border-slate-50 bg-slate-50 opacity-50 cursor-not-allowed grayscale' 
                       : 'border-slate-100 bg-white hover:border-emerald-500 hover:shadow-lg hover:shadow-emerald-500/10 active:scale-[0.98]'
                     }
                   `}
                 >
                   <div className="flex items-center gap-5">
-                    <div className={`p-3.5 rounded-xl ${isBusy ? 'bg-slate-200 text-slate-400' : 'bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100'}`}>
+                    <div className={`p-3.5 rounded-xl ${isUnavailable ? 'bg-slate-200 text-slate-400' : 'bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100'}`}>
                       <Icon size={28} strokeWidth={2} />
                     </div>
                     <div>
-                      <p className="font-bold text-lg text-slate-800 group-hover:text-emerald-900">{c.name}</p>
+                      <p className={`font-bold text-lg ${isUnavailable ? 'text-slate-500' : 'text-slate-800 group-hover:text-emerald-900'}`}>{c.name}</p>
                       <div className="flex items-center gap-2 text-sm font-medium text-slate-500">
                         <span>{c.type}</span>
                         <span className="w-1 h-1 rounded-full bg-slate-300"></span>
                         <span>{c.power}</span>
                       </div>
+                      {isUnavailable && (
+                        <p className="text-xs text-slate-400 font-medium mt-1">{statusText}</p>
+                      )}
                     </div>
                   </div>
-                  <div className={`px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${isBusy ? 'bg-slate-200 text-slate-500' : 'bg-emerald-100 text-emerald-700'}`}>
-                    {c.status}
+                  <div className={`px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                    isUnavailable 
+                      ? 'bg-slate-200 text-slate-500' 
+                      : 'bg-emerald-100 text-emerald-700'
+                  }`}>
+                    {statusText}
                   </div>
                 </button>
               );
@@ -476,14 +643,29 @@ function HomeContent() {
           
           {/* Header */}
           <div className="p-6 border-b border-slate-50 bg-gradient-to-r from-emerald-50 to-emerald-100/50">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse shadow-lg shadow-emerald-500/50"></div>
-                <span className="font-bold text-lg text-slate-900">Ładowanie aktywne</span>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse shadow-lg shadow-emerald-500/50"></div>
+                  <span className="font-bold text-lg text-slate-900">Ładowanie aktywne</span>
+                </div>
+                {selectedConnectorData && (
+                  <div className="px-3 py-1.5 bg-white rounded-full border border-emerald-200">
+                    <span className="text-xs font-bold text-emerald-700">{selectedConnectorData.power}</span>
+                  </div>
+                )}
               </div>
-              {selectedConnectorData && (
-                <div className="px-3 py-1.5 bg-white rounded-full border border-emerald-200">
-                  <span className="text-xs font-bold text-emerald-700">{selectedConnectorData.power}</span>
+              {(stationAddress || stationCity) && (
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-slate-600 font-medium">
+                    {stationAddress && <span>{stationAddress}</span>}
+                    {stationAddress && stationCity && <span>, </span>}
+                    {stationCity && <span>{stationCity}</span>}
+                  </p>
+                  <button className="text-xs text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1 transition-colors">
+                    <span>📍</span>
+                    <span>Wybierz inny punkt</span>
+                  </button>
                 </div>
               )}
             </div>

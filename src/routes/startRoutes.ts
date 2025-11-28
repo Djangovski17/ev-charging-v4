@@ -372,6 +372,7 @@ router.get('/station/:stationId', async (req, res) => {
   try {
     const { stationId } = req.params;
     
+    console.log(`[GET /station/:stationId] Frontend pyta o dane stacji: ${stationId}`);
     logInfo('[Station] Fetching station status', { stationId });
     
     const station = await prisma.station.findUnique({
@@ -382,10 +383,13 @@ router.get('/station/:stationId', async (req, res) => {
         status: true,
         connectorType: true,
         pricePerKwh: true,
+        address: true,
+        city: true,
       },
     });
 
     if (!station) {
+      console.log(`[GET /station/:stationId] Stacja nie znaleziona: ${stationId}`);
       res.status(404).json({
         success: false,
         message: `Station ${stationId} not found`,
@@ -393,15 +397,126 @@ router.get('/station/:stationId', async (req, res) => {
       return;
     }
 
+    // Pobierz wszystkie aktywne transakcje dla tej stacji
+    const activeTransactions = await prisma.transaction.findMany({
+      where: {
+        stationId: stationId,
+        status: {
+          in: ['CHARGING', 'ACTIVE', 'PENDING'],
+        },
+      },
+    });
+
+    console.log(`[GET /station/:stationId] Znaleziono ${activeTransactions.length} aktywnych transakcji dla stacji ${stationId}`);
+
+    // Definiuj listę złączy (zgodnie z frontendem: 3 złącza)
+    // W rzeczywistości złącza powinny być w bazie danych, ale na razie używamy hardcoded listy
+    const connectors = [
+      { id: '1', name: 'Złącze A', type: 'Type 2', power: '22 kW', defaultStatus: 'AVAILABLE' },
+      { id: '2', name: 'Złącze B', type: 'CCS', power: '50 kW', defaultStatus: 'AVAILABLE' },
+      { id: '3', name: 'Złącze C', type: 'CHAdeMO', power: '50 kW', defaultStatus: 'AVAILABLE' },
+    ];
+
+    // Sprawdź dla każdego złącza, czy istnieje aktywna transakcja
+    // Ponieważ Transaction nie ma connectorId, sprawdzamy czy istnieje aktywna transakcja dla stacji
+    // Zgodnie z logiką OCPP, connectorId: 1 jest domyślnie używany
+    const connectorsWithStatus = connectors.map(connector => {
+      // Jeśli istnieje aktywna transakcja, złącze 1 jest zajęte (zgodnie z logiką OCPP)
+      // W przyszłości można rozszerzyć, aby Transaction miał connectorId
+      const isOccupied = activeTransactions.length > 0 && connector.id === '1';
+      
+      return {
+        id: connector.id,
+        name: connector.name,
+        type: connector.type,
+        power: connector.power,
+        status: isOccupied ? 'CHARGING' : connector.defaultStatus,
+      };
+    });
+
+    console.log(`[GET /station/:stationId] Zwracam dane stacji z złączami:`, {
+      id: station.id,
+      name: station.name,
+      address: station.address,
+      city: station.city,
+      pricePerKwh: station.pricePerKwh,
+      connectors: connectorsWithStatus,
+    });
+
     res.json({
       success: true,
-      station,
+      station: {
+        ...station,
+        connectors: connectorsWithStatus,
+      },
     });
   } catch (error) {
     logError('[Station] Failed to fetch station status', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch station status',
+      error: error instanceof Error ? error.message : 'An unexpected error occurred',
+    });
+  }
+});
+
+// Endpoint do odzyskiwania aktywnej sesji ładowania
+router.get('/stations/:stationId/active-session', async (req, res) => {
+  try {
+    const { stationId } = req.params;
+    
+    console.log(`[GET /stations/:stationId/active-session] Frontend pyta o aktywną sesję dla stacji: ${stationId}`);
+    logInfo('[ActiveSession] Fetching active session', { stationId });
+    
+    // Szukaj transakcji ze statusem CHARGING lub ACTIVE (nie COMPLETED/FAULTED)
+    const activeTransaction = await prisma.transaction.findFirst({
+      where: {
+        stationId: stationId,
+        status: {
+          in: ['CHARGING', 'ACTIVE', 'PENDING'],
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      include: {
+        station: true,
+      },
+    });
+
+    if (!activeTransaction) {
+      console.log(`[GET /stations/:stationId/active-session] Brak aktywnej sesji dla stacji: ${stationId}`);
+      res.status(404).json({
+        success: false,
+        message: 'No active session found',
+        data: null,
+      });
+      return;
+    }
+
+    // Zwróć dane sesji
+    const sessionData = {
+      transactionId: activeTransaction.id,
+      connectorId: 1, // Domyślnie 1, zgodnie z logiką OCPP
+      startTime: activeTransaction.startTime,
+      meterStart: 0, // Początkowa wartość licznika (0 kWh na początku)
+      amount: activeTransaction.amount,
+      stripePaymentId: activeTransaction.stripePaymentId,
+    };
+
+    console.log(`[GET /stations/:stationId/active-session] Znaleziono aktywną sesję:`, sessionData);
+    logInfo('[ActiveSession] Active session found', { stationId, transactionId: activeTransaction.id });
+
+    res.json({
+      success: true,
+      data: sessionData,
+    });
+  } catch (error) {
+    console.error(`[GET /stations/:stationId/active-session] Błąd:`, error);
+    logError('[ActiveSession] Failed to fetch active session', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch active session',
       error: error instanceof Error ? error.message : 'An unexpected error occurred',
     });
   }
