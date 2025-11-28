@@ -109,6 +109,7 @@ export const getTransactions = async (_req: Request, res: Response): Promise<voi
           select: {
             id: true,
             name: true,
+            connectorType: true,
           },
         },
       },
@@ -118,6 +119,259 @@ export const getTransactions = async (_req: Request, res: Response): Promise<voi
     logError('[Admin] Failed to fetch transactions', error);
     res.status(500).json({
       error: 'Failed to fetch transactions',
+      message: error instanceof Error ? error.message : 'An unexpected error occurred',
+    });
+  }
+};
+
+export const getStats = async (req: Request, res: Response): Promise<void> => {
+  try {
+    logInfo('[Admin] Fetching statistics');
+    
+    // Parsowanie parametrów query (startDate i endDate)
+    let startDate: Date;
+    let endDate: Date;
+
+    if (req.query.startDate && req.query.endDate) {
+      // Jeśli podano oba parametry, użyj ich
+      startDate = new Date(req.query.startDate as string);
+      endDate = new Date(req.query.endDate as string);
+      
+      // Ustaw startDate na początek dnia
+      startDate.setHours(0, 0, 0, 0);
+      // Ustaw endDate na koniec dnia (następny dzień, 00:00:00)
+      endDate.setHours(23, 59, 59, 999);
+    } else {
+      // Domyślnie: dzisiejszy dzień
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      startDate = today;
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      endDate = tomorrow;
+    }
+
+    // Walidacja dat
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      res.status(400).json({
+        error: 'Invalid date format',
+        message: 'startDate and endDate must be valid ISO date strings',
+      });
+      return;
+    }
+
+    if (startDate > endDate) {
+      res.status(400).json({
+        error: 'Invalid date range',
+        message: 'startDate must be before or equal to endDate',
+      });
+      return;
+    }
+
+    // ===== ZŁĄCZA =====
+    // Total Connectors - całkowita liczba stacji (każda stacja = jedno złącze)
+    const totalConnectors = await prisma.station.count();
+
+    // Status Counts - liczniki statusów stacji
+    const stations = await prisma.station.findMany({
+      select: {
+        status: true,
+      },
+    });
+
+    const statusCounts = {
+      available: 0,
+      charging: 0,
+      faulted: 0,
+    };
+
+    stations.forEach((station) => {
+      const status = station.status.toUpperCase();
+      if (status === 'AVAILABLE') {
+        statusCounts.available++;
+      } else if (status === 'CHARGING' || status === 'OCCUPIED' || status === 'PENDING') {
+        statusCounts.charging++;
+      } else if (status === 'UNAVAILABLE' || status === 'FAILED' || status === 'FAULTED') {
+        statusCounts.faulted++;
+      }
+    });
+
+    // ===== FINANSE I WOLUMEN (w zadanym okresie) =====
+    // Total Revenue - suma amount z transakcji zakończonych (status 'COMPLETED') w okresie
+    const totalRevenueResult = await prisma.transaction.aggregate({
+      where: {
+        createdAt: {
+          gte: startDate,
+          lte: endDate,
+        },
+        status: 'COMPLETED',
+      },
+      _sum: {
+        amount: true,
+      },
+    });
+
+    // Total Energy - suma energyKwh w okresie
+    const totalEnergyResult = await prisma.transaction.aggregate({
+      where: {
+        createdAt: {
+          gte: startDate,
+          lte: endDate,
+        },
+        status: 'COMPLETED',
+      },
+      _sum: {
+        energyKwh: true,
+      },
+    });
+
+    // Total Sessions - liczba transakcji w okresie
+    const totalSessions = await prisma.transaction.count({
+      where: {
+        createdAt: {
+          gte: startDate,
+          lte: endDate,
+        },
+        status: 'COMPLETED',
+      },
+    });
+
+    const totalRevenue = totalRevenueResult._sum.amount || 0;
+    const totalEnergy = totalEnergyResult._sum.energyKwh || 0;
+
+    // ===== ŚREDNIE (w zadanym okresie) =====
+    // Pobierz wszystkie zakończone transakcje w okresie do obliczenia średnich
+    const completedTransactions = await prisma.transaction.findMany({
+      where: {
+        createdAt: {
+          gte: startDate,
+          lte: endDate,
+        },
+        status: 'COMPLETED',
+        endTime: {
+          not: null,
+        },
+      },
+      select: {
+        amount: true,
+        energyKwh: true,
+        startTime: true,
+        endTime: true,
+      },
+    });
+
+    // Avg Cost - średni koszt sesji
+    const avgCost = totalSessions > 0 ? totalRevenue / totalSessions : 0;
+
+    // Avg kWh - średnia ilość kWh na sesję
+    const avgKwh = totalSessions > 0 ? totalEnergy / totalSessions : 0;
+
+    // Avg Duration - średni czas trwania sesji (w minutach)
+    let totalDurationMinutes = 0;
+    let validDurationsCount = 0;
+
+    completedTransactions.forEach((transaction) => {
+      if (transaction.endTime) {
+        const start = new Date(transaction.startTime);
+        const end = new Date(transaction.endTime);
+        const durationMs = end.getTime() - start.getTime();
+        const durationMinutes = durationMs / (1000 * 60);
+        if (durationMinutes > 0) {
+          totalDurationMinutes += durationMinutes;
+          validDurationsCount++;
+        }
+      }
+    });
+
+    const avgDuration = validDurationsCount > 0 ? totalDurationMinutes / validDurationsCount : 0;
+
+    res.json({
+      // Złącza
+      totalConnectors,
+      statusCounts,
+      // Finanse i wolumen
+      totalRevenue,
+      totalEnergy,
+      totalSessions,
+      // Średnie
+      avgCost: Math.round(avgCost * 100) / 100, // Zaokrąglenie do 2 miejsc po przecinku
+      avgKwh: Math.round(avgKwh * 100) / 100,
+      avgDuration: Math.round(avgDuration * 100) / 100,
+    });
+  } catch (error) {
+    logError('[Admin] Failed to fetch statistics', error);
+    res.status(500).json({
+      error: 'Failed to fetch statistics',
+      message: error instanceof Error ? error.message : 'An unexpected error occurred',
+    });
+  }
+};
+
+export const updateStation = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { name, connectorType, pricePerKwh, status } = req.body;
+
+    if (!id) {
+      res.status(400).json({
+        error: 'Invalid request',
+        message: 'Station ID is required',
+      });
+      return;
+    }
+
+    const updateData: {
+      name?: string;
+      connectorType?: string;
+      pricePerKwh?: number;
+      status?: string;
+    } = {};
+
+    if (name !== undefined && typeof name === 'string') {
+      updateData.name = name;
+    }
+
+    if (connectorType !== undefined && typeof connectorType === 'string') {
+      updateData.connectorType = connectorType;
+    }
+
+    if (pricePerKwh !== undefined) {
+      if (typeof pricePerKwh !== 'number' || pricePerKwh <= 0) {
+        res.status(400).json({
+          error: 'Invalid request',
+          message: 'pricePerKwh must be a positive number',
+        });
+        return;
+      }
+      updateData.pricePerKwh = pricePerKwh;
+    }
+
+    if (status !== undefined && typeof status === 'string') {
+      updateData.status = status;
+    }
+
+    logInfo('[Admin] Updating station', { stationId: id, updateData });
+
+    const station = await prisma.station.update({
+      where: { id },
+      data: updateData,
+    });
+
+    logInfo('[Admin] Station updated successfully', { stationId: station.id });
+    res.json(station);
+  } catch (error) {
+    logError('[Admin] Failed to update station', error);
+
+    if (error instanceof Error && error.message.includes('Record to update does not exist')) {
+      res.status(404).json({
+        error: 'Station not found',
+        message: 'The station with the provided ID does not exist',
+      });
+      return;
+    }
+
+    res.status(500).json({
+      error: 'Failed to update station',
       message: error instanceof Error ? error.message : 'An unexpected error occurred',
     });
   }

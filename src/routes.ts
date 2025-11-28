@@ -3,12 +3,14 @@ import healthRoutes from './routes/healthRoutes';
 import startRoutes from './routes/startRoutes';
 import paymentRoutes from './routes/paymentRoutes';
 import adminRoutes from './routes/adminRoutes';
+import stationRoutes from './routes/stationRoutes';
 
 export const registerRoutes = (app: Express): void => {
   // Rejestracja routingu - kolejność ma znaczenie!
   // Najpierw specyficzne ścieżki, potem ogólne
   app.use('/health', healthRoutes);
   app.use('/admin', adminRoutes);
+  app.use('/api', stationRoutes); // /api/stations
   app.use('/', startRoutes); // /start/:cpId będzie tutaj
   app.use('/', paymentRoutes);
   

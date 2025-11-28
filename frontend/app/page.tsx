@@ -6,7 +6,8 @@ import { io, Socket } from "socket.io-client";
 import axios from "axios";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
-import { Zap, Plug, BatteryCharging, Info, Wallet, Clock, CheckCircle2, AlertCircle, ArrowLeft, CreditCard } from "lucide-react";
+import { Zap, Plug, BatteryCharging, Info, Wallet, Clock, CheckCircle2, AlertCircle, ArrowLeft, CreditCard, MapPin, Navigation } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 // --- KONFIGURACJA ---
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
@@ -14,6 +15,19 @@ const STRIPE_KEY = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "";
 const stripePromise = loadStripe(STRIPE_KEY);
 
 type ViewState = "idle" | "payment" | "charging" | "summary";
+
+// Typ dla stacji z API
+type Station = {
+  id: string;
+  name: string;
+  address: string | null;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  pricePerKwh: number;
+  status: "Available" | "Busy";
+  distance?: number; // Dystans w km (dodawany po obliczeniu)
+};
 
 // --- HOOK DO OPÓŹNIENIA (Debounce) ---
 function useDebounce<T>(value: T, delay: number): T {
@@ -30,7 +44,7 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 // --- KOMPONENT PŁATNOŚCI STRIPE ---
-const CheckoutForm = ({ amount, onSuccess, onCancel }: { amount: number, onSuccess: () => void, onCancel: () => void }) => {
+const CheckoutForm = ({ amount, onSuccess, onCancel, stationName }: { amount: number, onSuccess: () => void, onCancel: () => void, stationName?: string }) => {
   const stripe = useStripe();
   const elements = useElements();
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +73,14 @@ const CheckoutForm = ({ amount, onSuccess, onCancel }: { amount: number, onSucce
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6 mt-4">
+      {/* Nagłówek z nazwą stacji */}
+      {stationName && (
+        <div className="text-center pb-2">
+          <p className="text-sm text-slate-500 font-medium mb-1">Stacja</p>
+          <p className="text-lg font-bold text-slate-900">{stationName}</p>
+        </div>
+      )}
+      
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm min-h-[200px]">
         {/* To jest miejsce, gdzie Stripe wstrzykuje swój formularz */}
         <PaymentElement id="payment-element" options={{ layout: "tabs" }} />
@@ -103,9 +125,30 @@ const CheckoutForm = ({ amount, onSuccess, onCancel }: { amount: number, onSucce
   );
 };
 
+// --- FUNKCJA HAVERSINE (obliczanie dystansu) ---
+function calculateDistance(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371; // Promień Ziemi w km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; // Dystans w km
+}
+
 // --- GŁÓWNA ZAWARTOŚĆ ---
 function HomeContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const stationId = searchParams.get("station");
   
   // Stany
@@ -130,6 +173,8 @@ function HomeContent() {
   const [customerEmail, setCustomerEmail] = useState("");
   const [stationAddress, setStationAddress] = useState<string | null>(null);
   const [stationCity, setStationCity] = useState<string | null>(null);
+  const [stationName, setStationName] = useState<string | null>(null);
+  const [pricePerKwh, setPricePerKwh] = useState<number>(2.50);
   const [connectors, setConnectors] = useState<Array<{
     id: string;
     name: string;
@@ -139,7 +184,14 @@ function HomeContent() {
     icon: typeof Plug | typeof Zap | typeof BatteryCharging;
   }>>([]);
 
-  const PRICE_PER_KWH = 2.50;
+  // Stany dla widoku wyboru stacji
+  const [stations, setStations] = useState<Station[]>([]);
+  const [isLoadingStations, setIsLoadingStations] = useState(false);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [isRequestingLocation, setIsRequestingLocation] = useState(false);
+
+  const PRICE_PER_KWH = pricePerKwh;
 
   // Mapowanie ikon dla złączy (na podstawie typu)
   const getConnectorIcon = (type: string): typeof Plug | typeof Zap | typeof BatteryCharging => {
@@ -175,8 +227,10 @@ function HomeContent() {
         try {
           const response = await axios.get(`${API_URL}/station/${stationId}`);
           if (response.data.success && response.data.station) {
+            setStationName(response.data.station.name || null);
             setStationAddress(response.data.station.address || null);
             setStationCity(response.data.station.city || null);
+            setPricePerKwh(response.data.station.pricePerKwh || 2.50);
             
             // Pobierz złącza z backendu i dodaj ikony
             if (response.data.station.connectors && Array.isArray(response.data.station.connectors)) {
@@ -208,6 +262,101 @@ function HomeContent() {
       fetchStationData();
     }
   }, [stationId]);
+
+  // Pobierz listę stacji (gdy brak stationId)
+  useEffect(() => {
+    if (!stationId) {
+      const fetchStations = async () => {
+        setIsLoadingStations(true);
+        try {
+          const response = await axios.get(`${API_URL}/api/stations`);
+          if (response.data.success && response.data.stations) {
+            let stationsData: Station[] = response.data.stations;
+
+            // Jeśli użytkownik udostępnił lokalizację, oblicz dystans i posortuj
+            if (userLocation) {
+              stationsData = stationsData.map(station => {
+                if (station.latitude && station.longitude) {
+                  const distance = calculateDistance(
+                    userLocation.lat,
+                    userLocation.lon,
+                    station.latitude,
+                    station.longitude
+                  );
+                  return { ...station, distance };
+                }
+                return station;
+              });
+
+              // Sortuj po dystansie (najbliższe pierwsze)
+              stationsData.sort((a, b) => {
+                if (a.distance !== undefined && b.distance !== undefined) {
+                  return a.distance - b.distance;
+                }
+                if (a.distance !== undefined) return -1;
+                if (b.distance !== undefined) return 1;
+                return 0;
+              });
+            } else {
+              // Sortuj alfabetycznie po mieście, potem po nazwie
+              stationsData.sort((a, b) => {
+                const cityA = a.city || '';
+                const cityB = b.city || '';
+                if (cityA !== cityB) {
+                  return cityA.localeCompare(cityB);
+                }
+                return a.name.localeCompare(b.name);
+              });
+            }
+
+            setStations(stationsData);
+          }
+        } catch (err) {
+          console.error("Błąd pobierania stacji:", err);
+        } finally {
+          setIsLoadingStations(false);
+        }
+      };
+      fetchStations();
+    }
+  }, [stationId, userLocation]);
+
+  // Funkcja do pobrania lokalizacji użytkownika
+  const handleRequestLocation = () => {
+    setIsRequestingLocation(true);
+    setLocationError(null);
+
+    if (!navigator.geolocation) {
+      setLocationError("Twoja przeglądarka nie obsługuje geolokacji");
+      setIsRequestingLocation(false);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setUserLocation({
+          lat: position.coords.latitude,
+          lon: position.coords.longitude,
+        });
+        setIsRequestingLocation(false);
+      },
+      (error) => {
+        console.error("Błąd geolokacji:", error);
+        setLocationError("Nie udało się pobrać lokalizacji. Sprawdź uprawnienia przeglądarki.");
+        setIsRequestingLocation(false);
+      }
+    );
+  };
+
+  // Funkcja do przejścia do widoku stacji
+  const handleSelectStation = (stationId: string) => {
+    router.push(`/?station=${stationId}`);
+  };
+
+  // Funkcja do usunięcia parametru station z URL (powrót do widoku wyboru)
+  const handleBackToStationSelection = () => {
+    router.push('/');
+  };
 
   // Odzyskiwanie sesji przy mount - sprawdź czy jest aktywna sesja
   useEffect(() => {
@@ -262,7 +411,7 @@ function HomeContent() {
       
       checkActiveSession();
     } else {
-      // Jeśli nie ma stationId, od razu ustaw isLoading na false
+      // Jeśli nie ma stationId, od razu ustaw isLoading na false (nie pokazuj ekranu ładowania)
       setIsLoading(false);
     }
   }, [stationId]);
@@ -430,8 +579,126 @@ function HomeContent() {
 
   // --- RENDEROWANIE WIDOKÓW ---
 
-  // Ekran ładowania podczas sprawdzania sesji
-  if (isLoading) {
+  // 0. WIDOK WYBORU STACJI (gdy brak stationId)
+  if (!stationId) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-4 font-sans text-slate-900">
+        <div className="max-w-2xl mx-auto">
+          {/* Nagłówek */}
+          <div className="text-center mb-6 mt-8">
+            <h1 className="text-3xl font-extrabold text-slate-900 mb-2">Znajdź stację ładowania</h1>
+            <p className="text-slate-500 font-medium">Wybierz stację z listy poniżej</p>
+          </div>
+
+          {/* Przycisk geolokacji */}
+          <div className="mb-6 flex justify-center">
+            <button
+              onClick={handleRequestLocation}
+              disabled={isRequestingLocation}
+              className="px-6 py-3 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {isRequestingLocation ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Pobieranie lokalizacji...
+                </>
+              ) : (
+                <>
+                  <Navigation size={20} />
+                  📍 Udostępnij lokalizację
+                </>
+              )}
+            </button>
+          </div>
+
+          {locationError && (
+            <div className="mb-4 p-3 bg-rose-50 text-rose-600 text-sm rounded-lg flex items-center gap-2 border border-rose-100">
+              <AlertCircle size={16} />
+              {locationError}
+            </div>
+          )}
+
+          {/* Lista stacji */}
+          {isLoadingStations ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center space-y-4">
+                <div className="w-16 h-16 bg-emerald-100 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+                  <Zap size={32} className="text-emerald-600 animate-pulse" fill="currentColor" />
+                </div>
+                <p className="text-slate-500 font-medium">Ładowanie stacji...</p>
+              </div>
+            </div>
+          ) : stations.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-slate-500 font-medium">Brak dostępnych stacji</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {stations.map((station) => {
+                const isAvailable = station.status === "Available";
+                
+                return (
+                  <div
+                    key={station.id}
+                    className="bg-white rounded-2xl border-2 border-slate-100 hover:border-emerald-500 hover:shadow-lg hover:shadow-emerald-500/10 transition-all p-6"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h3 className="text-xl font-bold text-slate-900">{station.name}</h3>
+                          <div className={`w-3 h-3 rounded-full ${isAvailable ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+                          <span className={`text-sm font-bold ${isAvailable ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {isAvailable ? 'Dostępna' : 'Zajęta'}
+                          </span>
+                        </div>
+                        
+                        {(station.address || station.city) && (
+                          <div className="flex items-center gap-2 text-slate-500 font-medium mb-2">
+                            <MapPin size={16} />
+                            <span>
+                              {station.address && <span>{station.address}</span>}
+                              {station.address && station.city && <span>, </span>}
+                              {station.city && <span>{station.city}</span>}
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-4 mt-3">
+                          <span className="text-sm font-bold text-emerald-600">
+                            od {station.pricePerKwh.toFixed(2)} zł/kWh
+                          </span>
+                          {station.distance !== undefined && (
+                            <span className="text-sm text-slate-500 font-medium">
+                              {station.distance.toFixed(1)} km stąd
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleSelectStation(station.id)}
+                        disabled={!isAvailable}
+                        className={`px-6 py-3 rounded-xl font-bold transition-all ${
+                          isAvailable
+                            ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 active:scale-[0.98]'
+                            : 'bg-slate-200 text-slate-500 cursor-not-allowed opacity-50'
+                        }`}
+                      >
+                        Wybierz
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Ekran ładowania podczas sprawdzania sesji (tylko gdy jest stationId)
+  if (isLoading && stationId) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center p-4 font-sans">
         <div className="text-center space-y-6">
@@ -447,30 +714,37 @@ function HomeContent() {
     );
   }
 
-  // 1. WYBÓR ZŁĄCZA
-  if (!stationId || viewState === "idle") {
+  // 1. WYBÓR ZŁĄCZA (gdy jest stationId ale viewState === "idle")
+  if (viewState === "idle" && stationId) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans text-slate-900">
         <div className="w-full max-w-md bg-white rounded-[2rem] shadow-2xl shadow-slate-200/50 overflow-hidden border border-slate-100">
-          <div className="bg-white p-8 pb-4 text-center border-b border-slate-50">
+          <div className="bg-white p-8 pb-4 border-b border-slate-50">
             <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm">
               <Zap size={32} fill="currentColor" />
             </div>
-            <h1 className="text-2xl font-extrabold text-slate-900 mb-1">Stacja {stationId || "Demo"}</h1>
-            {(stationAddress || stationCity) && (
-              <p className="text-slate-500 font-medium text-sm mb-2">
-                {stationAddress && <span>{stationAddress}</span>}
-                {stationAddress && stationCity && <span>, </span>}
-                {stationCity && <span>{stationCity}</span>}
-              </p>
-            )}
-            <div className="flex items-center justify-center gap-2 mt-2">
-              <button className="text-xs text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1 transition-colors">
+            <div className="flex flex-col items-center text-center space-y-2">
+              {/* Linia 1: Nazwa Stacji */}
+              <h1 className="text-2xl font-extrabold text-slate-900">{stationName || `Stacja ${stationId || "Demo"}`}</h1>
+              
+              {/* Linia 2: Adres stacji */}
+              {(stationAddress || stationCity) && (
+                <p className="text-slate-500 font-medium text-sm">
+                  {stationAddress && <span>{stationAddress}</span>}
+                  {stationAddress && stationCity && <span>, </span>}
+                  {stationCity && <span>{stationCity}</span>}
+                </p>
+              )}
+              
+              {/* Linia 3: Przycisk Wybierz inny punkt */}
+              <button 
+                onClick={handleBackToStationSelection}
+                className="text-xs text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1 transition-colors mt-1"
+              >
                 <span>📍</span>
-                <span>Wybierz inny punkt</span>
+                <span>Wybierz inny punkt ładowania</span>
               </button>
             </div>
-            <p className="text-slate-500 font-medium mt-3">Wybierz punkt ładowania</p>
           </div>
 
           <div className="p-6 space-y-4">
@@ -503,6 +777,7 @@ function HomeContent() {
                         <span className="w-1 h-1 rounded-full bg-slate-300"></span>
                         <span>{c.power}</span>
                       </div>
+                      <p className="text-sm font-bold text-emerald-600 mt-1">{pricePerKwh.toFixed(2)} zł/kWh</p>
                       {isUnavailable && (
                         <p className="text-xs text-slate-400 font-medium mt-1">{statusText}</p>
                       )}
@@ -538,6 +813,14 @@ function HomeContent() {
           </div>
 
           <div className="p-8 space-y-8">
+            {/* Nazwa stacji na górze */}
+            {stationName && (
+              <div className="text-center pb-2">
+                <p className="text-sm text-slate-500 font-medium mb-1">Stacja</p>
+                <p className="text-xl font-bold text-slate-900">{stationName}</p>
+              </div>
+            )}
+            
             <div className="flex items-center gap-4 p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
               <div className="p-3 bg-white rounded-xl shadow-sm text-emerald-600">
                 {selectedConnectorData?.icon && <selectedConnectorData.icon size={24} />}
@@ -614,7 +897,8 @@ function HomeContent() {
                         onCancel={() => {
                           setShowPaymentForm(false);
                           setClientSecret("");
-                        }} 
+                        }}
+                        stationName={stationName || undefined}
                       />
                     </Elements>
                   ) : (
@@ -643,7 +927,7 @@ function HomeContent() {
           
           {/* Header */}
           <div className="p-6 border-b border-slate-50 bg-gradient-to-r from-emerald-50 to-emerald-100/50">
-            <div className="space-y-2">
+            <div className="flex flex-col space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse shadow-lg shadow-emerald-500/50"></div>
@@ -656,15 +940,18 @@ function HomeContent() {
                 )}
               </div>
               {(stationAddress || stationCity) && (
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col space-y-1">
                   <p className="text-sm text-slate-600 font-medium">
                     {stationAddress && <span>{stationAddress}</span>}
                     {stationAddress && stationCity && <span>, </span>}
                     {stationCity && <span>{stationCity}</span>}
                   </p>
-                  <button className="text-xs text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1 transition-colors">
+                  <button 
+                    onClick={handleBackToStationSelection}
+                    className="text-xs text-emerald-600 hover:text-emerald-700 font-medium flex items-center gap-1 transition-colors self-start"
+                  >
                     <span>📍</span>
-                    <span>Wybierz inny punkt</span>
+                    <span>Wybierz inny punkt ładowania</span>
                   </button>
                 </div>
               )}
@@ -745,16 +1032,16 @@ function HomeContent() {
             <button
               onClick={handleStopCharging}
               disabled={isStopping}
-              className="w-full py-5 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-bold text-lg shadow-lg shadow-rose-600/20 transition-all active:scale-[0.98] flex items-center justify-center gap-3 disabled:opacity-50"
+              className="w-full py-5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-2xl font-bold text-lg transition-all active:scale-[0.98] flex items-center justify-center gap-3 disabled:opacity-50"
             >
               {isStopping ? (
                 <span className="flex items-center gap-2">
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <div className="w-4 h-4 border-2 border-red-300 border-t-red-600 rounded-full animate-spin" />
                   Zatrzymywanie...
                 </span>
               ) : (
                 <>
-                  <div className="w-3 h-3 bg-white rounded-sm"></div>
+                  <div className="w-3 h-3 bg-red-600 rounded-sm"></div>
                   Zakończ ładowanie
                 </>
               )}
