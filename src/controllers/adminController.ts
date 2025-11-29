@@ -13,7 +13,50 @@ export const getStations = async (_req: Request, res: Response): Promise<void> =
       },
       orderBy: { createdAt: 'desc' },
     });
-    res.json(stations);
+
+    // Sprawdź dla każdej stacji, czy trwa aktywna transakcja
+    // i zaktualizuj status odpowiednich złączy na 'CHARGING'
+    const stationsWithDynamicStatus = await Promise.all(
+      stations.map(async (station) => {
+        // Sprawdź, czy istnieje aktywna transakcja dla tej stacji
+        const activeTransaction = await prisma.transaction.findFirst({
+          where: {
+            stationId: station.id,
+            status: {
+              in: ['PENDING', 'CHARGING'],
+            },
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+        });
+
+        // Jeśli istnieje aktywna transakcja, zaktualizuj status złączy
+        if (activeTransaction) {
+          // W OCPP używany jest connectorId: 1 (pierwsze złącze)
+          // Więc ustawiamy status pierwszego złącza (lub wszystkich, jeśli nie wiemy które)
+          const updatedConnectors = station.connectors.map((connector, index) => {
+            // Dla uproszczenia, jeśli trwa transakcja, pierwsze złącze jest w użyciu
+            if (index === 0 && connector.status !== 'FAULTED' && connector.status !== 'UNAVAILABLE') {
+              return {
+                ...connector,
+                status: 'CHARGING',
+              };
+            }
+            return connector;
+          });
+
+          return {
+            ...station,
+            connectors: updatedConnectors,
+          };
+        }
+
+        return station;
+      })
+    );
+
+    res.json(stationsWithDynamicStatus);
   } catch (error) {
     logError('[Admin] Failed to fetch stations', error);
     res.status(500).json({
@@ -117,6 +160,13 @@ export const getTransactions = async (_req: Request, res: Response): Promise<voi
             connectorType: true,
           },
         },
+        connector: {
+          select: {
+            id: true,
+            type: true,
+            powerKw: true,
+          },
+        },
       },
     });
     res.json(transactions);
@@ -144,16 +194,17 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
       
       // Ustaw startDate na początek dnia
       startDate.setHours(0, 0, 0, 0);
-      // Ustaw endDate na koniec dnia (następny dzień, 00:00:00)
+      // Ustaw endDate na koniec dnia (23:59:59.999)
       endDate.setHours(23, 59, 59, 999);
     } else {
       // Domyślnie: dzisiejszy dzień
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       startDate = today;
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      endDate = tomorrow;
+      // Ustaw endDate na koniec dzisiejszego dnia
+      const endOfToday = new Date(today);
+      endOfToday.setHours(23, 59, 59, 999);
+      endDate = endOfToday;
     }
 
     // Walidacja dat
@@ -204,6 +255,7 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
 
     // ===== FINANSE I WOLUMEN (w zadanym okresie) =====
     // Pobierz wszystkie zakończone transakcje w okresie z danymi stacji
+    // endDate jest już ustawione na koniec dnia (23:59:59.999), więc użyjemy go bezpośrednio
     const completedTransactions = await prisma.transaction.findMany({
       where: {
         createdAt: {
@@ -260,8 +312,14 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
     const chartData: Array<{ date: string; revenue: number; energy: number; sessions: number }> = [];
     const currentDate = new Date(startDate);
     
+    // Utwórz datę końcową dla porównania (tylko data, bez czasu)
+    // endDate jest ustawione na koniec dnia (23:59:59.999), więc porównujemy tylko daty
+    const endDateForComparison = new Date(endDate);
+    endDateForComparison.setHours(0, 0, 0, 0);
+    
     // Iteruj przez wszystkie dni w zakresie (od startDate do endDate włącznie)
-    while (currentDate <= endDate) {
+    // Porównujemy tylko daty (bez czasu), aby uwzględnić cały dzisiejszy dzień
+    while (currentDate <= endDateForComparison) {
       const dateKey = currentDate.toISOString().split('T')[0];
       const existingData = chartDataMap.get(dateKey);
       
@@ -341,7 +399,7 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
 export const updateStation = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { name, connectorType, pricePerKwh, status } = req.body;
+    const { name, connectorType, pricePerKwh, status, address, city, latitude, longitude } = req.body;
 
     if (!id) {
       res.status(400).json({
@@ -356,6 +414,10 @@ export const updateStation = async (req: Request, res: Response): Promise<void> 
       connectorType?: string;
       pricePerKwh?: number;
       status?: string;
+      address?: string | null;
+      city?: string | null;
+      latitude?: number | null;
+      longitude?: number | null;
     } = {};
 
     if (name !== undefined && typeof name === 'string') {
@@ -379,6 +441,40 @@ export const updateStation = async (req: Request, res: Response): Promise<void> 
 
     if (status !== undefined && typeof status === 'string') {
       updateData.status = status;
+    }
+
+    if (address !== undefined) {
+      updateData.address = address === null || address === '' ? null : String(address);
+    }
+
+    if (city !== undefined) {
+      updateData.city = city === null || city === '' ? null : String(city);
+    }
+
+    if (latitude !== undefined && latitude !== null) {
+      if (typeof latitude !== 'number' || isNaN(latitude)) {
+        res.status(400).json({
+          error: 'Invalid request',
+          message: 'latitude must be a valid number',
+        });
+        return;
+      }
+      updateData.latitude = latitude;
+    } else if (latitude === null) {
+      updateData.latitude = null;
+    }
+
+    if (longitude !== undefined && longitude !== null) {
+      if (typeof longitude !== 'number' || isNaN(longitude)) {
+        res.status(400).json({
+          error: 'Invalid request',
+          message: 'longitude must be a valid number',
+        });
+        return;
+      }
+      updateData.longitude = longitude;
+    } else if (longitude === null) {
+      updateData.longitude = null;
     }
 
     logInfo('[Admin] Updating station', { stationId: id, updateData });
@@ -411,7 +507,7 @@ export const updateStation = async (req: Request, res: Response): Promise<void> 
 export const updateConnector = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { pricePerKwh, status } = req.body;
+    const { pricePerKwh, status, type, powerKw } = req.body;
 
     if (!id) {
       res.status(400).json({
@@ -424,6 +520,8 @@ export const updateConnector = async (req: Request, res: Response): Promise<void
     const updateData: {
       pricePerKwh?: number;
       status?: string;
+      type?: string;
+      powerKw?: number;
     } = {};
 
     if (pricePerKwh !== undefined) {
@@ -441,10 +539,25 @@ export const updateConnector = async (req: Request, res: Response): Promise<void
       updateData.status = status;
     }
 
+    if (type !== undefined && typeof type === 'string') {
+      updateData.type = type;
+    }
+
+    if (powerKw !== undefined) {
+      if (typeof powerKw !== 'number' || powerKw <= 0 || !Number.isInteger(powerKw)) {
+        res.status(400).json({
+          error: 'Invalid request',
+          message: 'powerKw must be a positive integer',
+        });
+        return;
+      }
+      updateData.powerKw = powerKw;
+    }
+
     if (Object.keys(updateData).length === 0) {
       res.status(400).json({
         error: 'Invalid request',
-        message: 'At least one field (pricePerKwh or status) must be provided',
+        message: 'At least one field (pricePerKwh, status, type, or powerKw) must be provided',
       });
       return;
     }

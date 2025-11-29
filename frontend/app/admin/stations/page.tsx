@@ -21,6 +21,8 @@ interface Station {
   pricePerKwh: number;
   address: string | null;
   city: string | null;
+  latitude: number | null;
+  longitude: number | null;
   connectors: Connector[];
   createdAt: string;
   updatedAt: string;
@@ -31,7 +33,11 @@ export default function StationsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [expandedStations, setExpandedStations] = useState<Set<string>>(new Set());
   const [editingPrice, setEditingPrice] = useState<{ connectorId: string; value: string } | null>(null);
+  const [editingType, setEditingType] = useState<{ connectorId: string; value: string } | null>(null);
+  const [editingPower, setEditingPower] = useState<{ connectorId: string; value: string } | null>(null);
   const [updatingConnector, setUpdatingConnector] = useState<Set<string>>(new Set());
+  const [editingStation, setEditingStation] = useState<Station | null>(null);
+  const [isUpdatingStation, setIsUpdatingStation] = useState(false);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
@@ -96,6 +102,113 @@ export default function StationsPage() {
 
   const handlePriceCancel = () => {
     setEditingPrice(null);
+  };
+
+  const handleTypeEdit = (connectorId: string, currentType: string) => {
+    setEditingType({ connectorId, value: currentType });
+  };
+
+  const handleTypeSave = async (e: React.FormEvent, connectorId: string) => {
+    e.preventDefault();
+    if (!editingType || editingType.connectorId !== connectorId) return;
+
+    const newType = editingType.value.trim();
+    if (!newType) {
+      alert("Typ złącza nie może być pusty");
+      setEditingType(null);
+      return;
+    }
+
+    setUpdatingConnector((prev) => new Set(prev).add(connectorId));
+    try {
+      await axios.put(`${API_URL}/admin/connectors/${connectorId}`, {
+        type: newType,
+      });
+      await fetchStations();
+      setEditingType(null);
+    } catch (error) {
+      console.error("Error updating connector type:", error);
+      alert("Błąd podczas aktualizacji typu złącza");
+    } finally {
+      setUpdatingConnector((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(connectorId);
+        return newSet;
+      });
+    }
+  };
+
+  const handleTypeCancel = () => {
+    setEditingType(null);
+  };
+
+  const handlePowerEdit = (connectorId: string, currentPower: number) => {
+    setEditingPower({ connectorId, value: currentPower.toString() });
+  };
+
+  const handlePowerSave = async (e: React.FormEvent, connectorId: string) => {
+    e.preventDefault();
+    if (!editingPower || editingPower.connectorId !== connectorId) return;
+
+    const newPower = parseFloat(editingPower.value);
+    if (isNaN(newPower) || newPower <= 0) {
+      alert("Moc musi być liczbą większą od 0");
+      setEditingPower(null);
+      return;
+    }
+
+    setUpdatingConnector((prev) => new Set(prev).add(connectorId));
+    try {
+      await axios.put(`${API_URL}/admin/connectors/${connectorId}`, {
+        powerKw: newPower,
+      });
+      await fetchStations();
+      setEditingPower(null);
+    } catch (error) {
+      console.error("Error updating connector power:", error);
+      alert("Błąd podczas aktualizacji mocy");
+    } finally {
+      setUpdatingConnector((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(connectorId);
+        return newSet;
+      });
+    }
+  };
+
+  const handlePowerCancel = () => {
+    setEditingPower(null);
+  };
+
+  const handleStationEdit = (station: Station) => {
+    setEditingStation(station);
+  };
+
+  const handleStationSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStation) return;
+
+    setIsUpdatingStation(true);
+    try {
+      await axios.put(`${API_URL}/admin/stations/${editingStation.id}`, {
+        name: editingStation.name,
+        address: editingStation.address,
+        city: editingStation.city,
+        latitude: editingStation.latitude ? parseFloat(editingStation.latitude.toString()) : null,
+        longitude: editingStation.longitude ? parseFloat(editingStation.longitude.toString()) : null,
+      });
+      await fetchStations();
+      setEditingStation(null);
+    } catch (error) {
+      console.error("Error updating station:", error);
+      alert("Błąd podczas aktualizacji stacji");
+    } finally {
+      setIsUpdatingStation(false);
+    }
+  };
+
+  const handleStationCancel = () => {
+    setEditingStation(null);
   };
 
   const handleStatusChange = async (connectorId: string, newStatus: string) => {
@@ -196,6 +309,40 @@ export default function StationsPage() {
               <tbody className="bg-white divide-y divide-slate-200">
                 {stations.map((station) => {
                   const isExpanded = expandedStations.has(station.id);
+                  
+                  // Oblicz statystyki złączy dla stacji
+                  const total = station.connectors.length;
+                  // Liczba złączy ze statusem 'AVAILABLE' (bez aktywnej transakcji)
+                  const available = station.connectors.filter(
+                    c => c.status === 'AVAILABLE'
+                  ).length;
+                  const activeSessions = station.connectors.filter(
+                    c => c.status === 'CHARGING' || c.status === 'OCCUPIED'
+                  ).length;
+                  
+                  // Określ status stacji na podstawie logiki
+                  let stationStatusLabel = '';
+                  let stationStatusColor = '';
+                  
+                  if (available === 0 && total > 0) {
+                    // Wszystkie złącza zajęte lub awaria
+                    stationStatusLabel = `Zajęta (${available}/${total})`;
+                    stationStatusColor = 'bg-red-100 text-red-800';
+                  } else if (activeSessions > 0 || available < total) {
+                    // Jest aktywna sesja LUB nie wszystkie złącza są wolne
+                    stationStatusLabel = `W użyciu (${available}/${total})`;
+                    stationStatusColor = 'bg-yellow-100 text-yellow-800';
+                  } else if (available === total && total > 0) {
+                    // Wszystkie złącza są wolne
+                    stationStatusLabel = `Dostępna (${available}/${total})`;
+                    stationStatusColor = 'bg-green-100 text-green-800';
+                  } else {
+                    // Domyślny status z bazy (z licznikiem jeśli są złącza)
+                    const baseLabel = getStatusLabel(station.status);
+                    stationStatusLabel = total > 0 ? `${baseLabel} (${available}/${total})` : baseLabel;
+                    stationStatusColor = getStatusColor(station.status);
+                  }
+                  
                   return (
                     <>
                       <tr
@@ -232,11 +379,9 @@ export default function StationsPage() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span
-                            className={`inline-flex px-3 py-1 text-xs font-semibold rounded-full ${getStatusColor(
-                              station.status
-                            )}`}
+                            className={`inline-flex px-3 py-1 text-xs font-semibold rounded-full ${stationStatusColor}`}
                           >
-                            {getStatusLabel(station.status)}
+                            {stationStatusLabel}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
@@ -247,8 +392,7 @@ export default function StationsPage() {
                             className="px-4 py-2 border border-slate-300 text-slate-700 font-medium rounded-lg hover:bg-slate-50 transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
-                              // TODO: Implementacja edycji
-                              alert(`Edycja stacji ${station.id}`);
+                              handleStationEdit(station);
                             }}
                           >
                             Edytuj
@@ -301,10 +445,110 @@ export default function StationsPage() {
                                               <div className="text-xs text-slate-500 mt-1">{connector.id}</div>
                                             </td>
                                             <td className="px-4 py-3 text-sm text-slate-700">
-                                              {connector.type}
+                                              {editingType?.connectorId === connector.id ? (
+                                                <form onSubmit={(e) => handleTypeSave(e, connector.id)} className="flex items-center gap-2">
+                                                  <select
+                                                    value={editingType.value}
+                                                    onChange={(e) =>
+                                                      setEditingType({
+                                                        ...editingType,
+                                                        value: e.target.value,
+                                                      })
+                                                    }
+                                                    className="px-2 py-1 border border-slate-300 rounded text-sm"
+                                                    autoFocus
+                                                    onBlur={handleTypeCancel}
+                                                  >
+                                                    <option value="CCS">CCS</option>
+                                                    <option value="Type2">Type2</option>
+                                                    <option value="CHAdeMO">CHAdeMO</option>
+                                                  </select>
+                                                  <button
+                                                    type="submit"
+                                                    disabled={isUpdating}
+                                                    className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 disabled:opacity-50"
+                                                  >
+                                                    ✓
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={handleTypeCancel}
+                                                    className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                                                  >
+                                                    ✕
+                                                  </button>
+                                                </form>
+                                              ) : (
+                                                <div className="flex items-center gap-2">
+                                                  <span>{connector.type}</span>
+                                                  <button
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      handleTypeEdit(connector.id, connector.type);
+                                                    }}
+                                                    disabled={isUpdating}
+                                                    className="px-2 py-1 text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded disabled:opacity-50"
+                                                    title="Edytuj typ złącza"
+                                                  >
+                                                    ✏️
+                                                  </button>
+                                                </div>
+                                              )}
                                             </td>
                                             <td className="px-4 py-3 text-sm text-slate-700">
-                                              {connector.powerKw} kW
+                                              {editingPower?.connectorId === connector.id ? (
+                                                <form onSubmit={(e) => handlePowerSave(e, connector.id)} className="flex items-center gap-2">
+                                                  <input
+                                                    type="number"
+                                                    step="1"
+                                                    min="1"
+                                                    value={editingPower.value}
+                                                    onChange={(e) =>
+                                                      setEditingPower({
+                                                        ...editingPower,
+                                                        value: e.target.value,
+                                                      })
+                                                    }
+                                                    className="w-20 px-2 py-1 border border-slate-300 rounded text-sm"
+                                                    autoFocus
+                                                    onKeyDown={(e) => {
+                                                      if (e.key === "Escape") {
+                                                        handlePowerCancel();
+                                                      }
+                                                    }}
+                                                  />
+                                                  <span className="text-xs text-slate-500">kW</span>
+                                                  <button
+                                                    type="submit"
+                                                    disabled={isUpdating}
+                                                    className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 disabled:opacity-50"
+                                                  >
+                                                    ✓
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={handlePowerCancel}
+                                                    className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                                                  >
+                                                    ✕
+                                                  </button>
+                                                </form>
+                                              ) : (
+                                                <div className="flex items-center gap-2">
+                                                  <span>{connector.powerKw} kW</span>
+                                                  <button
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      handlePowerEdit(connector.id, connector.powerKw);
+                                                    }}
+                                                    disabled={isUpdating}
+                                                    className="px-2 py-1 text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded disabled:opacity-50"
+                                                    title="Edytuj moc"
+                                                  >
+                                                    ✏️
+                                                  </button>
+                                                </div>
+                                              )}
                                             </td>
                                             <td className="px-4 py-3 text-sm text-slate-700">
                                               {isEditingPrice ? (
@@ -398,6 +642,122 @@ export default function StationsPage() {
               </tbody>
             </table>
           )}
+        </div>
+      )}
+      
+      {/* Modal edycji stacji */}
+      {editingStation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-slate-900">Edytuj stację</h2>
+              <button
+                onClick={handleStationCancel}
+                className="text-slate-500 hover:text-slate-700 text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleStationSave} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Nazwa
+                </label>
+                <input
+                  type="text"
+                  value={editingStation.name}
+                  onChange={(e) =>
+                    setEditingStation({ ...editingStation, name: e.target.value })
+                  }
+                  required
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Adres
+                </label>
+                <input
+                  type="text"
+                  value={editingStation.address || ""}
+                  onChange={(e) =>
+                    setEditingStation({ ...editingStation, address: e.target.value || null })
+                  }
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Miasto
+                </label>
+                <input
+                  type="text"
+                  value={editingStation.city || ""}
+                  onChange={(e) =>
+                    setEditingStation({ ...editingStation, city: e.target.value || null })
+                  }
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Latitude
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  value={editingStation.latitude || ""}
+                  onChange={(e) =>
+                    setEditingStation({
+                      ...editingStation,
+                      latitude: e.target.value ? parseFloat(e.target.value) : null,
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Longitude
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  value={editingStation.longitude || ""}
+                  onChange={(e) =>
+                    setEditingStation({
+                      ...editingStation,
+                      longitude: e.target.value ? parseFloat(e.target.value) : null,
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                />
+              </div>
+
+              <div className="flex gap-4 pt-4">
+                <button
+                  type="button"
+                  onClick={handleStationCancel}
+                  disabled={isUpdatingStation}
+                  className="flex-1 px-4 py-2 border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Anuluj
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingStation}
+                  className="flex-1 px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
+                >
+                  {isUpdatingStation ? "Zapisywanie..." : "Zapisz"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

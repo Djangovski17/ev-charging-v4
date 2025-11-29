@@ -397,7 +397,17 @@ router.get('/station/:stationId', async (req, res) => {
       return;
     }
 
-    // Pobierz wszystkie aktywne transakcje dla tej stacji
+    // Pobierz złącza z bazy danych dla tej stacji
+    const connectorsFromDb = await prisma.connector.findMany({
+      where: {
+        stationId: stationId,
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+
+    // Pobierz wszystkie aktywne transakcje dla tej stacji (z connectorId jeśli dostępne)
     const activeTransactions = await prisma.transaction.findMany({
       where: {
         stationId: stationId,
@@ -405,32 +415,51 @@ router.get('/station/:stationId', async (req, res) => {
           in: ['CHARGING', 'ACTIVE', 'PENDING'],
         },
       },
+      select: {
+        connectorId: true,
+      },
     });
 
     console.log(`[GET /station/:stationId] Znaleziono ${activeTransactions.length} aktywnych transakcji dla stacji ${stationId}`);
+    console.log(`[GET /station/:stationId] Znaleziono ${connectorsFromDb.length} złączy w bazie dla stacji ${stationId}`);
 
-    // Definiuj listę złączy (zgodnie z frontendem: 3 złącza)
-    // W rzeczywistości złącza powinny być w bazie danych, ale na razie używamy hardcoded listy
-    const connectors = [
-      { id: '1', name: 'Złącze A', type: 'Type 2', power: '22 kW', defaultStatus: 'AVAILABLE' },
-      { id: '2', name: 'Złącze B', type: 'CCS', power: '50 kW', defaultStatus: 'AVAILABLE' },
-      { id: '3', name: 'Złącze C', type: 'CHAdeMO', power: '50 kW', defaultStatus: 'AVAILABLE' },
-    ];
+    // Utwórz mapę aktywnych transakcji po connectorId
+    const activeConnectorIds = new Set(
+      activeTransactions
+        .map(t => t.connectorId)
+        .filter((id): id is string => id !== null && id !== undefined)
+    );
 
-    // Sprawdź dla każdego złącza, czy istnieje aktywna transakcja
-    // Ponieważ Transaction nie ma connectorId, sprawdzamy czy istnieje aktywna transakcja dla stacji
-    // Zgodnie z logiką OCPP, connectorId: 1 jest domyślnie używany
-    const connectorsWithStatus = connectors.map(connector => {
-      // Jeśli istnieje aktywna transakcja, złącze 1 jest zajęte (zgodnie z logiką OCPP)
-      // W przyszłości można rozszerzyć, aby Transaction miał connectorId
-      const isOccupied = activeTransactions.length > 0 && connector.id === '1';
-      
+    // Mapuj złącza z bazy na format dla frontendu z dynamicznym statusem
+    const connectorsWithStatus = connectorsFromDb.map(connector => {
+      let finalStatus: string = connector.status;
+
+      // PRIORYTET 1: Jeśli status w Connector to 'FAULTED' lub 'UNAVAILABLE' -> zwróć 'FAULTED'
+      if (connector.status === 'FAULTED' || connector.status === 'UNAVAILABLE') {
+        finalStatus = 'FAULTED';
+      }
+      // PRIORYTET 2: Jeśli jest aktywna transakcja na tym złączu -> zwróć 'CHARGING'
+      else if (activeConnectorIds.has(connector.id)) {
+        finalStatus = 'CHARGING';
+      }
+      // PRIORYTET 3: W przeciwnym razie użyj statusu z bazy (np. 'AVAILABLE')
+      else {
+        finalStatus = connector.status;
+      }
+
+      // Generuj nazwę złącza na podstawie typu i numeru (np. "CCS #1", "Type2 #2")
+      // Użyj indeksu + 1 jako numeru złącza
+      const connectorIndex = connectorsFromDb.findIndex(c => c.id === connector.id);
+      const connectorNumber = connectorIndex + 1;
+      const connectorName = `${connector.type} #${connectorNumber}`;
+
       return {
         id: connector.id,
-        name: connector.name,
+        name: connectorName,
         type: connector.type,
-        power: connector.power,
-        status: isOccupied ? 'CHARGING' : connector.defaultStatus,
+        power: `${connector.powerKw} kW`, // Mapuj powerKw na format 'X kW'
+        status: finalStatus,
+        pricePerKwh: connector.pricePerKwh, // Dodaj cenę złącza
       };
     });
 

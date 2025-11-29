@@ -187,6 +187,7 @@ function HomeContent() {
     type: string;
     power: string;
     status: string;
+    pricePerKwh: number;
     icon: typeof Plug | typeof Zap | typeof BatteryCharging;
   }>>([]);
 
@@ -246,6 +247,7 @@ function HomeContent() {
             setPricePerKwh(response.data.station.pricePerKwh || 2.50);
             
             // Pobierz złącza z backendu i dodaj ikony
+            // WYMUSZENIE: Tylko dane z API, bez mocków
             if (response.data.station.connectors && Array.isArray(response.data.station.connectors)) {
               const connectorsWithIcons = response.data.station.connectors.map((connector: {
                 id: string;
@@ -253,19 +255,20 @@ function HomeContent() {
                 type: string;
                 power: string;
                 status: string;
+                pricePerKwh?: number;
               }) => ({
-                ...connector,
+                id: connector.id,
+                name: connector.name,
+                type: connector.type,
+                power: connector.power, // Backend już zwraca w formacie 'X kW'
+                status: connector.status,
+                pricePerKwh: connector.pricePerKwh || pricePerKwh, // Użyj ceny złącza lub stacji jako fallback
                 icon: getConnectorIcon(connector.type),
               }));
               setConnectors(connectorsWithIcons);
             } else {
-              // Fallback: jeśli backend nie zwraca złączy, użyj domyślnych
-              const defaultConnectors = [
-                { id: '1', name: 'Złącze A', type: 'Type 2', power: '22 kW', status: 'AVAILABLE', icon: Plug },
-                { id: '2', name: 'Złącze B', type: 'CCS', power: '50 kW', status: 'AVAILABLE', icon: Zap },
-                { id: '3', name: 'Złącze C', type: 'CHAdeMO', power: '50 kW', status: 'AVAILABLE', icon: BatteryCharging },
-              ];
-              setConnectors(defaultConnectors);
+              // Jeśli backend nie zwraca złączy, ustaw pustą tablicę (BEZ MOCKÓW)
+              setConnectors([]);
             }
           }
         } catch (err) {
@@ -411,7 +414,7 @@ function HomeContent() {
   // Funkcja do otwierania nawigacji Google Maps
   const handleNavigateToStation = (station: Station) => {
     if (station.latitude && station.longitude) {
-      const url = `https://www.google.com/maps/dir/?api=1&destination=${station.latitude},${station.longitude}`;
+      const url = `https://www.google.com/maps/search/?api=1&query=${station.latitude},${station.longitude}`;
       window.open(url, '_blank');
     }
   };
@@ -550,10 +553,17 @@ function HomeContent() {
     setShowPaymentForm(false);
     try {
       setClientSecret(""); 
-      const res = await axios.post(`${API_URL}/create-payment-intent`, { 
+      const requestBody: { amount: number; stationId: string; connectorId?: string } = {
         amount: debouncedAmount * 100,
-        stationId: stationId 
-      });
+        stationId: stationId,
+      };
+      
+      // Dodaj connectorId jeśli jest wybrane
+      if (connectorId) {
+        requestBody.connectorId = connectorId;
+      }
+      
+      const res = await axios.post(`${API_URL}/create-payment-intent`, requestBody);
       setClientSecret(res.data.clientSecret);
       setShowPaymentForm(true);
     } catch (err) {
@@ -799,29 +809,36 @@ function HomeContent() {
           ) : (
             <div className="space-y-4">
               {stations.map((station) => {
-                const isAvailable = station.status === "Available";
-                
                 // Oblicz dostępność złączy
                 const connectors = station.connectors || [];
-                const totalConnectors = connectors.length;
-                const availableConnectors = connectors.filter(c => c.status === 'AVAILABLE').length;
+                const total = connectors.length;
+                // Liczba złączy dostępnych (tylko AVAILABLE, nie liczymy CHARGING ani FAULTED)
+                const available = connectors.filter(c => c.status === 'AVAILABLE').length;
                 
-                // Określ kolor pastylki dostępności
+                // Określ kolor pastylki dostępności zgodnie z nową logiką
                 let availabilityBadgeColor = '';
                 let availabilityText = '';
-                if (totalConnectors === 0) {
+                if (total > 0) {
+                  if (available === total) {
+                    // ZIELONY: Wszystkie złącza są wolne
+                    availabilityBadgeColor = 'bg-emerald-50 text-emerald-700';
+                    availabilityText = `${available}/${total} Dostępne`;
+                  } else if (available > 0 && available < total) {
+                    // ŻÓŁTY/POMARAŃCZOWY: Część złączy zajęta
+                    availabilityBadgeColor = 'bg-amber-50 text-amber-700';
+                    availabilityText = `${available}/${total} Dostępne`;
+                  } else if (available === 0) {
+                    // CZERWONY: Wszystkie złącza zajęte lub awaria
+                    availabilityBadgeColor = 'bg-red-50 text-red-700';
+                    availabilityText = `${available}/${total} Dostępne`;
+                  }
+                } else {
+                  // Brak danych o złączach
                   availabilityBadgeColor = 'bg-slate-100 text-slate-600';
                   availabilityText = 'Brak danych';
-                } else if (availableConnectors === 0) {
-                  availabilityBadgeColor = 'bg-red-100 text-red-700';
-                  availabilityText = 'Zajęte';
-                } else if (availableConnectors === totalConnectors) {
-                  availabilityBadgeColor = 'bg-emerald-100 text-emerald-700';
-                  availabilityText = `${availableConnectors}/${totalConnectors} Wolne`;
-                } else {
-                  availabilityBadgeColor = 'bg-yellow-100 text-yellow-700';
-                  availabilityText = `${availableConnectors}/${totalConnectors} Wolne`;
                 }
+                
+                const isAvailable = available > 0;
                 
                 // Pobierz unikalne typy złączy
                 const connectorTypes = Array.from(new Set(connectors.map(c => c.type))).filter(Boolean);
@@ -835,10 +852,6 @@ function HomeContent() {
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
                           <h3 className="text-xl font-bold text-slate-900">{station.name}</h3>
-                          <div className={`w-3 h-3 rounded-full ${isAvailable ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
-                          <span className={`text-sm font-bold ${isAvailable ? 'text-emerald-600' : 'text-red-600'}`}>
-                            {isAvailable ? 'Dostępna' : 'Zajęta'}
-                          </span>
                         </div>
                         
                         {(station.address || station.city) && (
@@ -880,7 +893,7 @@ function HomeContent() {
 
                       <div className="flex items-center gap-2">
                         {/* Pastylka statusu dostępności */}
-                        {totalConnectors > 0 && (
+                        {connectors.length > 0 && (
                           <span className={`px-3 py-2 rounded-lg text-xs font-bold ${availabilityBadgeColor}`}>
                             {availabilityText}
                           </span>
@@ -974,8 +987,10 @@ function HomeContent() {
           <div className="p-6 space-y-4">
             {connectors.map((c) => {
               const Icon = c.icon;
-              // Złącze jest nieaktywne jeśli status nie jest 'AVAILABLE'
-              const isUnavailable = c.status !== 'AVAILABLE';
+              // Złącze jest nieaktywne jeśli status to 'FAULTED', 'UNAVAILABLE', 'CHARGING' lub 'OCCUPIED'
+              const isUnavailable = c.status === 'FAULTED' || c.status === 'UNAVAILABLE' || c.status === 'CHARGING' || c.status === 'OCCUPIED';
+              // Wyszarzanie tylko dla FAULTED (awaria)
+              const isFaulted = c.status === 'FAULTED';
               const statusText = getStatusText(c.status);
               
               return (
@@ -984,8 +999,10 @@ function HomeContent() {
                   disabled={isUnavailable}
                   onClick={() => !isUnavailable && handleSelectConnector(c.id)}
                   className={`w-full flex items-center justify-between p-5 rounded-2xl border-2 transition-all duration-200 group text-left
-                    ${isUnavailable 
+                    ${isFaulted 
                       ? 'border-slate-50 bg-slate-50 opacity-50 cursor-not-allowed grayscale' 
+                      : isUnavailable
+                      ? 'border-slate-100 bg-slate-50 opacity-75 cursor-not-allowed'
                       : 'border-slate-100 bg-white hover:border-emerald-500 hover:shadow-lg hover:shadow-emerald-500/10 active:scale-[0.98]'
                     }
                   `}
@@ -1001,7 +1018,7 @@ function HomeContent() {
                         <span className="w-1 h-1 rounded-full bg-slate-300"></span>
                         <span>{c.power}</span>
                       </div>
-                      <p className="text-sm font-bold text-emerald-600 mt-1">{pricePerKwh.toFixed(2)} zł/kWh</p>
+                      <p className="text-sm font-bold text-emerald-600 mt-1">{c.pricePerKwh.toFixed(2)} zł/kWh</p>
                       {isUnavailable && (
                         <p className="text-xs text-slate-400 font-medium mt-1">{statusText}</p>
                       )}

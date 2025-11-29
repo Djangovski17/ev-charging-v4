@@ -7,11 +7,17 @@ interface Transaction {
   id: string;
   stripePaymentId: string;
   stationId: string;
+  connectorId: string | null;
   station: {
     id: string;
     name: string;
     connectorType: string;
   };
+  connector: {
+    id: string;
+    type: string;
+    powerKw: number;
+  } | null;
   amount: number;
   finalCost: number | null;
   energyKwh: number;
@@ -142,7 +148,15 @@ export default function TransactionsPage() {
                         {transaction.station.name}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
-                        {transaction.station.connectorType}
+                        {transaction.connector ? (
+                          <span>
+                            {transaction.connector.type} ({transaction.connector.powerKw} kW)
+                          </span>
+                        ) : transaction.connectorId ? (
+                          <span>Złącze #{transaction.connectorId}</span>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
                         {displayCost.toFixed(2)} zł

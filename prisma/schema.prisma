@@ -27,10 +27,12 @@ model Station {
 }
 
 model Transaction {
-  id              String    @id @default(uuid())
-  stripePaymentId String    @unique
+  id              String     @id @default(uuid())
+  stripePaymentId String     @unique
   stationId       String
-  station         Station   @relation(fields: [stationId], references: [id])
+  station         Station     @relation(fields: [stationId], references: [id])
+  connectorId     String?
+  connector       Connector?  @relation(fields: [connectorId], references: [id])
   amount          Float
   energyKwh       Float
   startTime       DateTime
@@ -40,18 +42,19 @@ model Transaction {
   finalEnergy     Float?
   finalCost       Float?
   refundedAmount  Float?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
 }
 
 model Connector {
-  id          String   @id @default(uuid())
-  stationId   String
-  station     Station  @relation(fields: [stationId], references: [id])
-  type        String   
-  powerKw     Int 
-  status      String   @default("AVAILABLE")
-  pricePerKwh Float    @default(2.00)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String        @id @default(uuid())
+  stationId    String
+  station      Station       @relation(fields: [stationId], references: [id])
+  transactions Transaction[]
+  type         String   
+  powerKw      Int 
+  status       String        @default("AVAILABLE")
+  pricePerKwh  Float         @default(2.00)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 }
