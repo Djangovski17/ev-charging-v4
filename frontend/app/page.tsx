@@ -6,7 +6,7 @@ import { io, Socket } from "socket.io-client";
 import axios from "axios";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
-import { Zap, Plug, BatteryCharging, Info, Wallet, Clock, CheckCircle2, AlertCircle, ArrowLeft, CreditCard, MapPin, Navigation } from "lucide-react";
+import { Zap, Plug, BatteryCharging, Info, Wallet, Clock, CheckCircle2, AlertCircle, ArrowLeft, CreditCard, MapPin, Navigation, Map, Filter, HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 // --- KONFIGURACJA ---
@@ -186,10 +186,17 @@ function HomeContent() {
 
   // Stany dla widoku wyboru stacji
   const [stations, setStations] = useState<Station[]>([]);
+  const [allStations, setAllStations] = useState<Station[]>([]); // Wszystkie stacje (przed filtrowaniem)
   const [isLoadingStations, setIsLoadingStations] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [isRequestingLocation, setIsRequestingLocation] = useState(false);
+  
+  // Stany dla filtrów
+  const [showFilters, setShowFilters] = useState(false);
+  const [priceSort, setPriceSort] = useState<"asc" | "desc" | null>(null);
+  const [statusFilter, setStatusFilter] = useState<"all" | "available">("all");
+  const [locationSort, setLocationSort] = useState(false); // Czy sortować po lokalizacji (najbliższe)
 
   const PRICE_PER_KWH = pricePerKwh;
 
@@ -273,7 +280,7 @@ function HomeContent() {
           if (response.data.success && response.data.stations) {
             let stationsData: Station[] = response.data.stations;
 
-            // Jeśli użytkownik udostępnił lokalizację, oblicz dystans i posortuj
+            // Jeśli użytkownik udostępnił lokalizację, oblicz dystans
             if (userLocation) {
               stationsData = stationsData.map(station => {
                 if (station.latitude && station.longitude) {
@@ -287,29 +294,9 @@ function HomeContent() {
                 }
                 return station;
               });
-
-              // Sortuj po dystansie (najbliższe pierwsze)
-              stationsData.sort((a, b) => {
-                if (a.distance !== undefined && b.distance !== undefined) {
-                  return a.distance - b.distance;
-                }
-                if (a.distance !== undefined) return -1;
-                if (b.distance !== undefined) return 1;
-                return 0;
-              });
-            } else {
-              // Sortuj alfabetycznie po mieście, potem po nazwie
-              stationsData.sort((a, b) => {
-                const cityA = a.city || '';
-                const cityB = b.city || '';
-                if (cityA !== cityB) {
-                  return cityA.localeCompare(cityB);
-                }
-                return a.name.localeCompare(b.name);
-              });
             }
 
-            setStations(stationsData);
+            setAllStations(stationsData);
           }
         } catch (err) {
           console.error("Błąd pobierania stacji:", err);
@@ -320,6 +307,63 @@ function HomeContent() {
       fetchStations();
     }
   }, [stationId, userLocation]);
+
+  // Efekt do filtrowania i sortowania stacji
+  useEffect(() => {
+    if (!stationId && allStations.length > 0) {
+      let filteredStations = [...allStations];
+
+      // Filtrowanie po statusie
+      if (statusFilter === "available") {
+        filteredStations = filteredStations.filter(s => s.status === "Available");
+      }
+
+      // Sortowanie po cenie
+      if (priceSort === "asc") {
+        filteredStations.sort((a, b) => a.pricePerKwh - b.pricePerKwh);
+      } else if (priceSort === "desc") {
+        filteredStations.sort((a, b) => b.pricePerKwh - a.pricePerKwh);
+      }
+
+      // Sortowanie po lokalizacji (najbliższe)
+      if (locationSort && userLocation) {
+        // Upewnij się, że dystans jest obliczony dla wszystkich stacji
+        filteredStations = filteredStations.map(station => {
+          if (station.latitude && station.longitude && station.distance === undefined) {
+            const distance = calculateDistance(
+              userLocation.lat,
+              userLocation.lon,
+              station.latitude,
+              station.longitude
+            );
+            return { ...station, distance };
+          }
+          return station;
+        });
+
+        filteredStations.sort((a, b) => {
+          if (a.distance !== undefined && b.distance !== undefined) {
+            return a.distance - b.distance;
+          }
+          if (a.distance !== undefined) return -1;
+          if (b.distance !== undefined) return 1;
+          return 0;
+        });
+      } else if (!priceSort && !locationSort) {
+        // Domyślne sortowanie alfabetyczne
+        filteredStations.sort((a, b) => {
+          const cityA = a.city || '';
+          const cityB = b.city || '';
+          if (cityA !== cityB) {
+            return cityA.localeCompare(cityB);
+          }
+          return a.name.localeCompare(b.name);
+        });
+      }
+
+      setStations(filteredStations);
+    }
+  }, [stationId, allStations, priceSort, statusFilter, locationSort, userLocation]);
 
   // Funkcja do pobrania lokalizacji użytkownika
   const handleRequestLocation = () => {
@@ -356,6 +400,19 @@ function HomeContent() {
   // Funkcja do usunięcia parametru station z URL (powrót do widoku wyboru)
   const handleBackToStationSelection = () => {
     router.push('/');
+  };
+
+  // Funkcja do otwierania nawigacji Google Maps
+  const handleNavigateToStation = (station: Station) => {
+    if (station.latitude && station.longitude) {
+      const url = `https://www.google.com/maps/dir/?api=1&destination=${station.latitude},${station.longitude}`;
+      window.open(url, '_blank');
+    }
+  };
+
+  // Funkcja do obsługi przycisku Pomoc
+  const handleHelpClick = () => {
+    alert("Potrzebujesz pomocy?\n\nSkontaktuj się z nami:\n📞 +48 123 456 789\n✉️ pomoc@plugbox.pl");
   };
 
   // Odzyskiwanie sesji przy mount - sprawdź czy jest aktywna sesja
@@ -618,6 +675,107 @@ function HomeContent() {
             </div>
           )}
 
+          {/* Sekcja Filtrów */}
+          <div className="mb-4">
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className="w-full px-4 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all flex items-center justify-between"
+            >
+              <div className="flex items-center gap-2">
+                <Filter size={18} />
+                <span>Filtruj</span>
+              </div>
+              {showFilters ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+            </button>
+
+            {showFilters && (
+              <div className="mt-3 p-4 bg-white rounded-xl border border-slate-200 space-y-4">
+                {/* Filtrowanie po cenie */}
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Cena</label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setPriceSort(priceSort === "asc" ? null : "asc")}
+                      className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all ${
+                        priceSort === "asc"
+                          ? "bg-emerald-600 text-white"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      Rosnąco
+                    </button>
+                    <button
+                      onClick={() => setPriceSort(priceSort === "desc" ? null : "desc")}
+                      className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all ${
+                        priceSort === "desc"
+                          ? "bg-emerald-600 text-white"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      Malejąco
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filtrowanie po statusie */}
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Status</label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setStatusFilter("all")}
+                      className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all ${
+                        statusFilter === "all"
+                          ? "bg-emerald-600 text-white"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      Wszystkie
+                    </button>
+                    <button
+                      onClick={() => setStatusFilter("available")}
+                      className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all ${
+                        statusFilter === "available"
+                          ? "bg-emerald-600 text-white"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      Tylko Wolne
+                    </button>
+                  </div>
+                </div>
+
+                {/* Sortowanie po lokalizacji */}
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Lokalizacja</label>
+                  <button
+                    onClick={() => {
+                      if (locationSort) {
+                        setLocationSort(false);
+                      } else {
+                        if (!userLocation) {
+                          handleRequestLocation();
+                          setLocationSort(true);
+                        } else {
+                          setLocationSort(true);
+                        }
+                      }
+                    }}
+                    className={`w-full py-2 px-4 rounded-lg font-medium transition-all ${
+                      locationSort
+                        ? "bg-emerald-600 text-white"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    {locationSort ? "✓ Najbliżej mnie" : "Najbliżej mnie"}
+                  </button>
+                  {locationSort && !userLocation && (
+                    <p className="text-xs text-slate-500 mt-2">Zgoda na geolokalizację jest wymagana</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Lista stacji */}
           {isLoadingStations ? (
             <div className="flex items-center justify-center py-12">
@@ -675,17 +833,30 @@ function HomeContent() {
                         </div>
                       </div>
 
-                      <button
-                        onClick={() => handleSelectStation(station.id)}
-                        disabled={!isAvailable}
-                        className={`px-6 py-3 rounded-xl font-bold transition-all ${
-                          isAvailable
-                            ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 active:scale-[0.98]'
-                            : 'bg-slate-200 text-slate-500 cursor-not-allowed opacity-50'
-                        }`}
-                      >
-                        Wybierz
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {/* Przycisk Nawiguj */}
+                        {station.latitude && station.longitude && (
+                          <button
+                            onClick={() => handleNavigateToStation(station)}
+                            className="w-12 h-12 flex items-center justify-center bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-all active:scale-[0.98]"
+                            title="Nawiguj do stacji"
+                          >
+                            <Map size={20} />
+                          </button>
+                        )}
+                        {/* Przycisk Wybierz */}
+                        <button
+                          onClick={() => handleSelectStation(station.id)}
+                          disabled={!isAvailable}
+                          className={`px-6 py-3 rounded-xl font-bold transition-all ${
+                            isAvailable
+                              ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 active:scale-[0.98]'
+                              : 'bg-slate-200 text-slate-500 cursor-not-allowed opacity-50'
+                          }`}
+                        >
+                          Wybierz
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -908,6 +1079,15 @@ function HomeContent() {
                   )}
                 </div>
               )}
+
+              {/* Przycisk Pomoc */}
+              <button
+                onClick={handleHelpClick}
+                className="w-full py-4 px-6 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+              >
+                <HelpCircle size={20} />
+                Pomoc
+              </button>
             </div>
           </div>
         </div>
@@ -1045,6 +1225,15 @@ function HomeContent() {
                   Zakończ ładowanie
                 </>
               )}
+            </button>
+
+            {/* Przycisk Pomoc */}
+            <button
+              onClick={handleHelpClick}
+              className="w-full py-4 px-6 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+            >
+              <HelpCircle size={20} />
+              Pomoc
             </button>
           </div>
         </div>

@@ -13,12 +13,43 @@ interface Transaction {
     connectorType: string;
   };
   amount: number;
+  finalCost: number | null;
   energyKwh: number;
   startTime: string;
   endTime: string | null;
   status: string;
   createdAt: string;
   updatedAt: string;
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const statusUpper = status.toUpperCase();
+  
+  if (statusUpper === "COMPLETED") {
+    return (
+      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+        Zakończona
+      </span>
+    );
+  } else if (statusUpper === "CHARGING" || statusUpper === "ACTIVE" || statusUpper === "PENDING") {
+    return (
+      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+        W Trakcie
+      </span>
+    );
+  } else if (statusUpper === "FAULTED" || statusUpper === "FAILED") {
+    return (
+      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+        Błąd
+      </span>
+    );
+  }
+  
+  return (
+    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800">
+      {status}
+    </span>
+  );
 }
 
 export default function TransactionsPage() {
@@ -88,33 +119,46 @@ export default function TransactionsPage() {
                     kWh
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider">
                     Data
                   </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-200">
-                {transactions.map((transaction) => (
-                  <tr key={transaction.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
-                      {transaction.stripePaymentId}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
-                      {transaction.station.name}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
-                      {transaction.station.connectorType}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
-                      {transaction.amount.toFixed(2)} zł
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
-                      {transaction.energyKwh.toFixed(2)} kWh
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
-                      {formatDate(transaction.createdAt)}
-                    </td>
-                  </tr>
-                ))}
+                {transactions.map((transaction) => {
+                  // Użyj finalCost jeśli dostępne, w przeciwnym razie amount
+                  const displayCost = transaction.finalCost !== null && transaction.finalCost !== undefined
+                    ? transaction.finalCost
+                    : transaction.amount;
+                  
+                  return (
+                    <tr key={transaction.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
+                        {transaction.stripePaymentId}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
+                        {transaction.station.name}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
+                        {transaction.station.connectorType}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
+                        {displayCost.toFixed(2)} zł
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
+                        {transaction.energyKwh.toFixed(2)} kWh
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
+                        <StatusBadge status={transaction.status} />
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
+                        {formatDate(transaction.createdAt)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}

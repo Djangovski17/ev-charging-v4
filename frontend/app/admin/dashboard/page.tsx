@@ -3,6 +3,14 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
+
+interface ChartDataPoint {
+  date: string;
+  revenue: number;
+  energy: number;
+  sessions: number;
+}
 
 interface Stats {
   totalConnectors: number;
@@ -10,6 +18,7 @@ interface Stats {
     available: number;
     charging: number;
     faulted: number;
+    total: number;
   };
   totalRevenue: number;
   totalEnergy: number;
@@ -17,6 +26,7 @@ interface Stats {
   avgCost: number;
   avgKwh: number;
   avgDuration: number;
+  chartData: ChartDataPoint[];
 }
 
 function StatCard({
@@ -85,6 +95,9 @@ function SmallStatCard({
   );
 }
 
+type ChartDataType = "revenue" | "energy" | "sessions";
+type TimeRange = "week" | "month" | "30days";
+
 export default function AdminDashboard() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -92,16 +105,46 @@ export default function AdminDashboard() {
   const [isLoadingStats, setIsLoadingStats] = useState(true);
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
+  const [chartDataType, setChartDataType] = useState<ChartDataType>("revenue");
+  const [timeRange, setTimeRange] = useState<TimeRange>("week");
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
-  // Ustaw domyślne daty na dzisiaj
+  // Funkcja do formatowania daty po polsku
+  const getFormattedDate = () => {
+    const today = new Date();
+    const days = ["Niedziela", "Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota"];
+    const months = [
+      "Stycznia", "Lutego", "Marca", "Kwietnia", "Maja", "Czerwca",
+      "Lipca", "Sierpnia", "Września", "Października", "Listopada", "Grudnia"
+    ];
+    return `${days[today.getDay()]}, ${today.getDate()} ${months[today.getMonth()]}`;
+  };
+
+  // Ustaw domyślne daty na podstawie zakresu czasu
   useEffect(() => {
     const today = new Date();
-    const todayStr = today.toISOString().split("T")[0];
-    setStartDate(todayStr);
-    setEndDate(todayStr);
-  }, []);
+    today.setHours(0, 0, 0, 0);
+    
+    let start: Date;
+    if (timeRange === "week") {
+      // Ten tydzień (od poniedziałku)
+      start = new Date(today);
+      const day = start.getDay();
+      const diff = start.getDate() - day + (day === 0 ? -6 : 1); // Ustaw na poniedziałek
+      start.setDate(diff);
+    } else if (timeRange === "month") {
+      // Ten miesiąc
+      start = new Date(today.getFullYear(), today.getMonth(), 1);
+    } else {
+      // Ostatnie 30 dni
+      start = new Date(today);
+      start.setDate(start.getDate() - 29);
+    }
+    
+    setStartDate(start.toISOString().split("T")[0]);
+    setEndDate(today.toISOString().split("T")[0]);
+  }, [timeRange]);
 
   // Sprawdź autentykację
   useEffect(() => {
@@ -182,11 +225,14 @@ export default function AdminDashboard() {
 
       {/* Sekcja 1: Status Infrastruktury */}
       <div className="mb-8">
-        <h2 className="text-xl font-semibold text-slate-900 mb-4">Status Infrastruktury</h2>
+        <div className="mb-2">
+          <h2 className="text-xl font-semibold text-slate-900">Status Infrastruktury</h2>
+          <p className="text-sm text-slate-600 mt-1">{getFormattedDate()}</p>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <StatCard
             title="Dostępne"
-            value={stats?.statusCounts.available ?? 0}
+            value={`${stats?.statusCounts.available ?? 0} / ${stats?.statusCounts.total ?? 0}`}
             icon={
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -220,45 +266,160 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Sekcja 2: Wyniki Finansowe */}
+      {/* Sekcja 2: Wyniki Finansowe - Wykres */}
       <div className="mb-8">
-        <h2 className="text-xl font-semibold text-slate-900 mb-4">Wyniki Finansowe</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <StatCard
-            title="Przychód"
-            value={stats?.totalRevenue ?? 0}
-            unit="PLN"
-            icon={
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            }
-            color="slate"
-            isLoading={isLoadingStats}
-          />
-          <StatCard
-            title="Sprzedana Energia"
-            value={stats?.totalEnergy ?? 0}
-            unit="kWh"
-            icon={
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            }
-            color="slate"
-            isLoading={isLoadingStats}
-          />
-          <StatCard
-            title="Liczba Sesji"
-            value={stats?.totalSessions ?? 0}
-            icon={
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-            }
-            color="slate"
-            isLoading={isLoadingStats}
-          />
+        <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+          {/* Nagłówek z tytułem, tabs i dropdown */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
+            <h2 className="text-xl font-semibold text-slate-900">Raport Sprzedaży</h2>
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Tabs */}
+              <div className="flex bg-slate-100 rounded-lg p-1">
+                <button
+                  onClick={() => setChartDataType("revenue")}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    chartDataType === "revenue"
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Przychody
+                </button>
+                <button
+                  onClick={() => setChartDataType("energy")}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    chartDataType === "energy"
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Sprzedana Energia
+                </button>
+                <button
+                  onClick={() => setChartDataType("sessions")}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    chartDataType === "sessions"
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Liczba Sesji
+                </button>
+              </div>
+              {/* Dropdown zakresu czasu */}
+              <div className="flex bg-slate-100 rounded-lg p-1">
+                <button
+                  onClick={() => setTimeRange("week")}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    timeRange === "week"
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Ten Tydzień
+                </button>
+                <button
+                  onClick={() => setTimeRange("30days")}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    timeRange === "30days"
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Ostatnie 30 Dni
+                </button>
+                <button
+                  onClick={() => setTimeRange("month")}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    timeRange === "month"
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Ten Miesiąc
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Wykres */}
+          {isLoadingStats ? (
+            <div className="h-96 flex items-center justify-center">
+              <div className="text-center">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-slate-600"></div>
+                <p className="mt-4 text-slate-600">Ładowanie danych...</p>
+              </div>
+            </div>
+          ) : stats?.chartData && stats.chartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={400}>
+              <BarChart data={stats.chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fill: "#64748b", fontSize: 12 }}
+                  tickFormatter={(value) => {
+                    const date = new Date(value);
+                    return `${date.getDate()}.${date.getMonth() + 1}`;
+                  }}
+                />
+                <YAxis
+                  tick={{ fill: "#64748b", fontSize: 12 }}
+                  tickFormatter={(value) => {
+                    if (chartDataType === "revenue") {
+                      return `${value} PLN`;
+                    } else if (chartDataType === "energy") {
+                      return `${value} kWh`;
+                    }
+                    return value.toString();
+                  }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "white",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "8px",
+                    padding: "8px 12px",
+                  }}
+                  labelFormatter={(value) => {
+                    const date = new Date(value);
+                    return date.toLocaleDateString("pl-PL", {
+                      day: "2-digit",
+                      month: "2-digit",
+                      year: "numeric",
+                    });
+                  }}
+                  formatter={(value: number) => {
+                    if (chartDataType === "revenue") {
+                      return [`${value.toFixed(2)} PLN`, "Przychód"];
+                    } else if (chartDataType === "energy") {
+                      return [`${value.toFixed(2)} kWh`, "Energia"];
+                    }
+                    return [value.toString(), "Sesje"];
+                  }}
+                />
+                <Bar
+                  dataKey={chartDataType}
+                  radius={[8, 8, 0, 0]}
+                >
+                  {stats.chartData.map((entry, index) => {
+                    const today = new Date().toISOString().split("T")[0];
+                    const isToday = entry.date === today;
+                    return (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={isToday ? "#3b82f6" : "#64748b"}
+                        opacity={isToday ? 1 : 0.7}
+                      />
+                    );
+                  })}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-96 flex items-center justify-center text-slate-500">
+              <p>Brak danych do wyświetlenia</p>
+            </div>
+          )}
         </div>
       </div>
 

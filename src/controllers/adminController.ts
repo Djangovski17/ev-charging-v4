@@ -183,6 +183,7 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
       available: 0,
       charging: 0,
       faulted: 0,
+      total: totalConnectors,
     };
 
     stations.forEach((station) => {
@@ -197,50 +198,7 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
     });
 
     // ===== FINANSE I WOLUMEN (w zadanym okresie) =====
-    // Total Revenue - suma amount z transakcji zakończonych (status 'COMPLETED') w okresie
-    const totalRevenueResult = await prisma.transaction.aggregate({
-      where: {
-        createdAt: {
-          gte: startDate,
-          lte: endDate,
-        },
-        status: 'COMPLETED',
-      },
-      _sum: {
-        amount: true,
-      },
-    });
-
-    // Total Energy - suma energyKwh w okresie
-    const totalEnergyResult = await prisma.transaction.aggregate({
-      where: {
-        createdAt: {
-          gte: startDate,
-          lte: endDate,
-        },
-        status: 'COMPLETED',
-      },
-      _sum: {
-        energyKwh: true,
-      },
-    });
-
-    // Total Sessions - liczba transakcji w okresie
-    const totalSessions = await prisma.transaction.count({
-      where: {
-        createdAt: {
-          gte: startDate,
-          lte: endDate,
-        },
-        status: 'COMPLETED',
-      },
-    });
-
-    const totalRevenue = totalRevenueResult._sum.amount || 0;
-    const totalEnergy = totalEnergyResult._sum.energyKwh || 0;
-
-    // ===== ŚREDNIE (w zadanym okresie) =====
-    // Pobierz wszystkie zakończone transakcje w okresie do obliczenia średnich
+    // Pobierz wszystkie zakończone transakcje w okresie z danymi stacji
     const completedTransactions = await prisma.transaction.findMany({
       where: {
         createdAt: {
@@ -248,17 +206,62 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
           lte: endDate,
         },
         status: 'COMPLETED',
-        endTime: {
-          not: null,
-        },
       },
       select: {
-        amount: true,
+        finalCost: true,
         energyKwh: true,
         startTime: true,
         endTime: true,
+        createdAt: true,
+        station: {
+          select: {
+            pricePerKwh: true,
+          },
+        },
       },
     });
+
+    // Total Revenue - suma finalCost (lub obliczone jako energyKwh * pricePerKwh jeśli finalCost null)
+    let totalRevenue = 0;
+    let totalEnergy = 0;
+    const chartDataMap = new Map<string, { revenue: number; energy: number; sessions: number }>();
+
+    completedTransactions.forEach((transaction) => {
+      // Oblicz revenue: użyj finalCost jeśli dostępne, w przeciwnym razie oblicz z energyKwh * pricePerKwh
+      const revenue = transaction.finalCost !== null && transaction.finalCost !== undefined
+        ? transaction.finalCost
+        : transaction.energyKwh * transaction.station.pricePerKwh;
+      
+      totalRevenue += revenue;
+      totalEnergy += transaction.energyKwh || 0;
+
+      // Grupowanie po dniach dla chartData
+      const dateKey = new Date(transaction.createdAt).toISOString().split('T')[0];
+      const existing = chartDataMap.get(dateKey);
+      if (existing) {
+        existing.revenue += revenue;
+        existing.energy += transaction.energyKwh || 0;
+        existing.sessions += 1;
+      } else {
+        chartDataMap.set(dateKey, {
+          revenue,
+          energy: transaction.energyKwh || 0,
+          sessions: 1,
+        });
+      }
+    });
+
+    // Konwersja chartDataMap do tablicy obiektów
+    const chartData = Array.from(chartDataMap.entries())
+      .map(([date, data]) => ({
+        date,
+        revenue: Math.round(data.revenue * 100) / 100,
+        energy: Math.round(data.energy * 100) / 100,
+        sessions: data.sessions,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const totalSessions = completedTransactions.length;
 
     // Avg Cost - średni koszt sesji
     const avgCost = totalSessions > 0 ? totalRevenue / totalSessions : 0;
@@ -290,13 +293,15 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
       totalConnectors,
       statusCounts,
       // Finanse i wolumen
-      totalRevenue,
-      totalEnergy,
+      totalRevenue: Math.round(totalRevenue * 100) / 100,
+      totalEnergy: Math.round(totalEnergy * 100) / 100,
       totalSessions,
       // Średnie
       avgCost: Math.round(avgCost * 100) / 100, // Zaokrąglenie do 2 miejsc po przecinku
       avgKwh: Math.round(avgKwh * 100) / 100,
       avgDuration: Math.round(avgDuration * 100) / 100,
+      // Dane do wykresów
+      chartData,
     });
   } catch (error) {
     logError('[Admin] Failed to fetch statistics', error);
