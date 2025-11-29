@@ -67,6 +67,7 @@ export default function TransactionsPage() {
   const [reportStartDate, setReportStartDate] = useState("");
   const [reportEndDate, setReportEndDate] = useState("");
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
@@ -263,16 +264,61 @@ export default function TransactionsPage() {
     }
   };
 
+  // Funkcja filtrująca transakcje
+  const filteredTransactions = transactions.filter((transaction) => {
+    if (!searchQuery.trim()) return true;
+    
+    const query = searchQuery.toLowerCase();
+    const stripeId = transaction.stripePaymentId.toLowerCase();
+    const stationName = transaction.station.name.toLowerCase();
+    const connectorType = transaction.connector?.type.toLowerCase() || "";
+    const connectorInfo = transaction.connector 
+      ? `${transaction.connector.type} (${transaction.connector.powerKw} kW)`.toLowerCase()
+      : transaction.connectorId 
+      ? `zlacze #${transaction.connectorId}`.toLowerCase()
+      : "";
+    
+    // Mapowanie statusów do polskich nazw
+    const statusMap: Record<string, string> = {
+      "COMPLETED": "zakonczona",
+      "CHARGING": "w trakcie",
+      "ACTIVE": "w trakcie",
+      "PENDING": "w trakcie",
+      "FAULTED": "blad",
+      "FAILED": "blad",
+    };
+    const statusText = statusMap[transaction.status.toUpperCase()] || transaction.status.toLowerCase();
+    
+    return (
+      stripeId.includes(query) ||
+      stationName.includes(query) ||
+      connectorType.includes(query) ||
+      connectorInfo.includes(query) ||
+      statusText.includes(query)
+    );
+  });
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold text-slate-900">Transakcje</h1>
-        <button
-          onClick={handleOpenModal}
-          className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors flex items-center gap-2"
-        >
-          📄 Wygeneruj Raport
-        </button>
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-3xl font-bold text-slate-900">Transakcje</h1>
+          <button
+            onClick={handleOpenModal}
+            className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors flex items-center gap-2"
+          >
+            📄 Wygeneruj Raport
+          </button>
+        </div>
+        <div className="flex justify-center">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Szukaj ID, stacji, statusu..."
+            className="w-full max-w-lg border border-slate-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-slate-500 focus:border-transparent"
+          />
+        </div>
       </div>
 
       {/* Modal */}
@@ -347,6 +393,10 @@ export default function TransactionsPage() {
             <div className="p-12 text-center text-slate-500">
               <p>Brak transakcji w bazie danych.</p>
             </div>
+          ) : filteredTransactions.length === 0 ? (
+            <div className="p-12 text-center text-slate-500">
+              <p>Brak transakcji spełniających kryteria wyszukiwania.</p>
+            </div>
           ) : (
             <table className="w-full">
               <thead className="bg-slate-50">
@@ -375,7 +425,7 @@ export default function TransactionsPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-200">
-                {transactions.map((transaction) => {
+                {filteredTransactions.map((transaction) => {
                   // Użyj finalCost jeśli dostępne, w przeciwnym razie amount
                   const displayCost = transaction.finalCost !== null && transaction.finalCost !== undefined
                     ? transaction.finalCost

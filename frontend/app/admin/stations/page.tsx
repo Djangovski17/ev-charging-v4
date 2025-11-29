@@ -38,6 +38,7 @@ export default function StationsPage() {
   const [updatingConnector, setUpdatingConnector] = useState<Set<string>>(new Set());
   const [editingStation, setEditingStation] = useState<Station | null>(null);
   const [isUpdatingStation, setIsUpdatingStation] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
@@ -262,9 +263,33 @@ export default function StationsPage() {
     return `Złącze ${String.fromCharCode(65 + index)}`; // A, B, C, ...
   };
 
+  // Funkcja filtrująca stacje
+  const filteredStations = stations.filter((station) => {
+    if (!searchQuery.trim()) return true;
+    
+    const query = searchQuery.toLowerCase();
+    const id = station.id.toLowerCase();
+    const name = station.name.toLowerCase();
+    const address = (station.address || "").toLowerCase();
+    const city = (station.city || "").toLowerCase();
+    
+    return id.includes(query) || name.includes(query) || address.includes(query) || city.includes(query);
+  });
+
   return (
     <div>
-      <h1 className="text-3xl font-bold text-slate-900 mb-6">Stacje</h1>
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold text-slate-900 mb-4">Stacje</h1>
+        <div className="flex justify-center">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Szukaj stacji, adresu, miasta..."
+            className="w-full max-w-lg border border-slate-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-slate-500 focus:border-transparent"
+          />
+        </div>
+      </div>
       {isLoading ? (
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-12 text-center">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-slate-600"></div>
@@ -275,6 +300,10 @@ export default function StationsPage() {
           {stations.length === 0 ? (
             <div className="p-12 text-center text-slate-500">
               <p>Brak stacji w bazie danych.</p>
+            </div>
+          ) : filteredStations.length === 0 ? (
+            <div className="p-12 text-center text-slate-500">
+              <p>Brak stacji spełniających kryteria wyszukiwania.</p>
             </div>
           ) : (
             <table className="w-full">
@@ -307,7 +336,7 @@ export default function StationsPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-200">
-                {stations.map((station) => {
+                {filteredStations.map((station) => {
                   const isExpanded = expandedStations.has(station.id);
                   
                   // Oblicz statystyki złączy dla stacji
