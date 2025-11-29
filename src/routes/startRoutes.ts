@@ -526,6 +526,7 @@ router.get('/stations/:stationId/active-session', async (req, res) => {
     // Zwróć dane sesji
     const sessionData = {
       transactionId: activeTransaction.id,
+      stationId: activeTransaction.stationId, // Dodaj stationId do odpowiedzi
       connectorId: 1, // Domyślnie 1, zgodnie z logiką OCPP
       startTime: activeTransaction.startTime,
       meterStart: 0, // Początkowa wartość licznika (0 kWh na początku)

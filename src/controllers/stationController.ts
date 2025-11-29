@@ -33,7 +33,7 @@ export const getAllStations = async (_req: Request, res: Response): Promise<void
       orderBy: { name: 'asc' },
     });
 
-    // Pobierz wszystkie aktywne transakcje (dla wszystkich stacji jednocześnie)
+    // Pobierz wszystkie aktywne transakcje z connectorId (dla wszystkich stacji jednocześnie)
     const activeTransactions = await prisma.transaction.findMany({
       where: {
         status: {
@@ -42,24 +42,50 @@ export const getAllStations = async (_req: Request, res: Response): Promise<void
       },
       select: {
         stationId: true,
+        connectorId: true,
       },
     });
 
-    // Utwórz Set z ID stacji, które mają aktywne transakcje
+    // Utwórz Map: stationId -> Set of connectorIds z aktywnymi transakcjami
+    const activeConnectorsByStation = new Map<string, Set<string>>();
+    activeTransactions.forEach(transaction => {
+      if (transaction.connectorId) {
+        if (!activeConnectorsByStation.has(transaction.stationId)) {
+          activeConnectorsByStation.set(transaction.stationId, new Set());
+        }
+        activeConnectorsByStation.get(transaction.stationId)!.add(transaction.connectorId);
+      }
+    });
+
+    // Utwórz Set z ID stacji, które mają aktywne transakcje (dla statusu stacji)
     const busyStationIds = new Set(activeTransactions.map(t => t.stationId));
 
-    // Dodaj status do każdej stacji
-    const stationsWithStatus = stations.map(station => ({
-      id: station.id,
-      name: station.name,
-      address: station.address,
-      city: station.city,
-      latitude: station.latitude,
-      longitude: station.longitude,
-      pricePerKwh: station.pricePerKwh,
-      status: busyStationIds.has(station.id) ? 'Busy' : 'Available',
-      connectors: station.connectors,
-    }));
+    // Dodaj status i oblicz availableCount dla każdej stacji
+    const stationsWithStatus = stations.map(station => {
+      // Pobierz złącza ze statusem 'AVAILABLE'
+      const availableConnectors = station.connectors.filter(c => c.status === 'AVAILABLE');
+      
+      // Pobierz Set złączy z aktywnymi transakcjami dla tej stacji
+      const activeConnectorIds = activeConnectorsByStation.get(station.id) || new Set();
+      
+      // Oblicz availableCount: złącza AVAILABLE minus te z aktywnymi transakcjami
+      const availableCount = availableConnectors.filter(
+        connector => !activeConnectorIds.has(connector.id)
+      ).length;
+      
+      return {
+        id: station.id,
+        name: station.name,
+        address: station.address,
+        city: station.city,
+        latitude: station.latitude,
+        longitude: station.longitude,
+        pricePerKwh: station.pricePerKwh,
+        status: busyStationIds.has(station.id) ? 'Busy' : 'Available',
+        connectors: station.connectors,
+        availableCount, // Dodaj obliczoną wartość
+      };
+    });
 
     logInfo('[Stations] Returning stations', { count: stationsWithStatus.length });
     res.json({

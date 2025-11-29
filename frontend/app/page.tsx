@@ -27,6 +27,7 @@ type Station = {
   pricePerKwh: number;
   status: "Available" | "Busy";
   distance?: number; // Dystans w km (dodawany po obliczeniu)
+  availableCount?: number; // Liczba dostępnych złączy (obliczona przez backend)
   connectors?: Array<{
     id: string;
     type: string;
@@ -282,8 +283,14 @@ function HomeContent() {
   // Pobierz listę stacji (gdy brak stationId)
   useEffect(() => {
     if (!stationId) {
-      const fetchStations = async () => {
-        setIsLoadingStations(true);
+      let isFirstLoad = true;
+      
+      const fetchStations = async (isPolling = false) => {
+        // Tylko przy pierwszym ładowaniu pokazuj loading state
+        if (!isPolling) {
+          setIsLoadingStations(true);
+        }
+        
         try {
           const response = await axios.get(`${API_URL}/api/stations`);
           if (response.data.success && response.data.stations) {
@@ -305,15 +312,44 @@ function HomeContent() {
               });
             }
 
-            setAllStations(stationsData);
+            // Aktualizuj stan TYLKO jeśli dane się zmieniły (porównaj po ID i availableCount)
+            setAllStations(prevStations => {
+              // Sprawdź czy dane faktycznie się zmieniły
+              const hasChanges = prevStations.length !== stationsData.length ||
+                prevStations.some((prev, index) => {
+                  const current = stationsData[index];
+                  return !current || 
+                    prev.id !== current.id || 
+                    prev.availableCount !== current.availableCount ||
+                    prev.status !== current.status;
+                });
+              
+              // Aktualizuj tylko jeśli są zmiany
+              return hasChanges ? stationsData : prevStations;
+            });
           }
         } catch (err) {
           console.error("Błąd pobierania stacji:", err);
         } finally {
-          setIsLoadingStations(false);
+          // Tylko przy pierwszym ładowaniu ukryj loading state
+          if (!isPolling) {
+            setIsLoadingStations(false);
+          }
+          isFirstLoad = false;
         }
       };
-      fetchStations();
+      
+      // Pobierz od razu (pierwsze ładowanie)
+      fetchStations(false);
+      
+      // Dodaj polling - odświeżaj listę stacji co 5 sekund (bez pokazywania loading state)
+      const pollingInterval = setInterval(() => {
+        fetchStations(true); // true = to jest polling, nie pokazuj loading
+      }, 5000); // 5 sekund
+      
+      return () => {
+        clearInterval(pollingInterval);
+      };
     }
   }, [stationId, userLocation]);
 
@@ -437,36 +473,72 @@ function HomeContent() {
           
           if (response.data.success && response.data.data) {
             const sessionData = response.data.data;
-            console.log(`[Session Recovery] Znaleziono aktywną sesję:`, sessionData);
+            const sessionTransactionId = sessionData.transactionId;
+            const sessionStationId = sessionData.stationId;
             
-            // Ustaw viewState na charging
-            setViewState("charging");
-            
-            // Zaktualizuj startTime na podstawie danych z backendu
-            if (sessionData.startTime) {
-              setSessionStartTime(new Date(sessionData.startTime));
+            // KRYTYCZNY WARUNEK: Sprawdź czy sesja należy do aktualnej stacji
+            if (sessionStationId && String(sessionStationId) !== String(stationId)) {
+              // Sesja należy do innej stacji - zignoruj ją
+              console.log(`[Session Recovery] Sesja należy do innej stacji (${sessionStationId} !== ${stationId}) - ignoruję sesję`);
+              setViewState("idle");
+              // Opcjonalnie: można tutaj wyświetlić toast/komunikat
+              // alert('Masz aktywne ładowanie na innej stacji');
+              return;
             }
             
-            // Zaktualizuj amount na podstawie wpłaconej kwoty
-            if (sessionData.amount) {
-              setAmount(sessionData.amount);
-            }
+            // Sprawdź, czy sesja należy do tego użytkownika (porównaj z localStorage)
+            const storedSessionId = localStorage.getItem('active_session_id');
             
-            // Ustaw connectorId (domyślnie 1, zgodnie z logiką OCPP)
-            if (sessionData.connectorId) {
-              setConnectorId(sessionData.connectorId.toString());
+            console.log(`[Session Recovery] Porównanie sesji:`, {
+              storedSessionId,
+              sessionTransactionId,
+              sessionStationId,
+              currentStationId: stationId,
+              stationMatch: sessionStationId === stationId,
+              userMatch: storedSessionId === sessionTransactionId
+            });
+            
+            // TYLKO jeśli ID zgadza się z localStorage I sesja należy do tej stacji - to moja sesja
+            if (storedSessionId && storedSessionId === sessionTransactionId && sessionStationId === stationId) {
+              console.log(`[Session Recovery] To moja sesja na tej stacji - przełączam na widok charging`);
+              
+              // Ustaw viewState na charging
+              setViewState("charging");
+              
+              // Zaktualizuj startTime na podstawie danych z backendu
+              if (sessionData.startTime) {
+                setSessionStartTime(new Date(sessionData.startTime));
+              }
+              
+              // Zaktualizuj amount na podstawie wpłaconej kwoty
+              if (sessionData.amount) {
+                setAmount(sessionData.amount);
+              }
+              
+              // Ustaw connectorId
+              if (sessionData.connectorId) {
+                setConnectorId(sessionData.connectorId.toString());
+              } else {
+                setConnectorId("1");
+              }
+              
+              console.log(`[Session Recovery] Sesja odzyskana - viewState: charging, amount: ${sessionData.amount}, startTime: ${sessionData.startTime}`);
             } else {
-              setConnectorId("1");
+              // To nie moja sesja lub sesja z innej stacji - zostań w widoku listy złączy
+              console.log(`[Session Recovery] To nie moja sesja lub sesja z innej stacji - zostaję w widoku listy złączy`);
+              setViewState("idle");
             }
-            
-            console.log(`[Session Recovery] Sesja odzyskana - viewState: charging, amount: ${sessionData.amount}, startTime: ${sessionData.startTime}`);
           } else {
             console.log(`[Session Recovery] Brak aktywnej sesji dla stacji: ${stationId}`);
+            // Usuń stary sessionId z localStorage jeśli nie ma aktywnej sesji
+            localStorage.removeItem('active_session_id');
           }
         } catch (err: any) {
           // 404 oznacza brak aktywnej sesji - to jest OK
           if (err.response?.status === 404) {
             console.log(`[Session Recovery] Brak aktywnej sesji (404)`);
+            // Usuń stary sessionId z localStorage
+            localStorage.removeItem('active_session_id');
           } else {
             console.error("[Session Recovery] Błąd sprawdzania sesji:", err);
           }
@@ -604,6 +676,13 @@ function HomeContent() {
       const response = await axios.get(`${API_URL}/start/${stationId}`);
       
       if (response.data.success) {
+        // Zapisz transactionId w localStorage
+        const transactionId = response.data.transactionId || response.data.data?.transactionId;
+        if (transactionId) {
+          localStorage.setItem('active_session_id', transactionId);
+          console.log(`[Session] Zapisano transactionId w localStorage: ${transactionId}`);
+        }
+        
         setViewState("charging");
         setSessionStartTime(new Date());
         setEnergyKwh(0);
@@ -625,6 +704,10 @@ function HomeContent() {
       const response = await axios.get(`${API_URL}/stop/${stationId}${params}`);
       
       if (response.data.success) {
+        // Usuń sessionId z localStorage po zakończeniu ładowania
+        localStorage.removeItem('active_session_id');
+        console.log(`[Session] Usunięto sessionId z localStorage po zakończeniu ładowania`);
+        
         // Użyj danych z backendu (zawierają rzeczywiste wartości z bazy danych)
         const finalCost = response.data.finalCost || (energyKwh * PRICE_PER_KWH);
         const refundAmount = response.data.refundAmount || Math.max(0, amount - finalCost);
@@ -812,8 +895,10 @@ function HomeContent() {
                 // Oblicz dostępność złączy
                 const connectors = station.connectors || [];
                 const total = connectors.length;
-                // Liczba złączy dostępnych (tylko AVAILABLE, nie liczymy CHARGING ani FAULTED)
-                const available = connectors.filter(c => c.status === 'AVAILABLE').length;
+                // Użyj availableCount z API jeśli dostępne, w przeciwnym razie oblicz lokalnie
+                const available = station.availableCount !== undefined 
+                  ? station.availableCount 
+                  : connectors.filter(c => c.status === 'AVAILABLE').length;
                 
                 // Określ kolor pastylki dostępności zgodnie z nową logiką
                 let availabilityBadgeColor = '';

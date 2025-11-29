@@ -18,41 +18,43 @@ export const getStations = async (_req: Request, res: Response): Promise<void> =
     // i zaktualizuj status odpowiednich złączy na 'CHARGING'
     const stationsWithDynamicStatus = await Promise.all(
       stations.map(async (station) => {
-        // Sprawdź, czy istnieje aktywna transakcja dla tej stacji
-        const activeTransaction = await prisma.transaction.findFirst({
+        // Pobierz wszystkie aktywne transakcje dla tej stacji
+        const activeTransactions = await prisma.transaction.findMany({
           where: {
             stationId: station.id,
             status: {
               in: ['PENDING', 'CHARGING'],
             },
           },
-          orderBy: {
-            createdAt: 'desc',
-          },
         });
 
-        // Jeśli istnieje aktywna transakcja, zaktualizuj status złączy
-        if (activeTransaction) {
-          // W OCPP używany jest connectorId: 1 (pierwsze złącze)
-          // Więc ustawiamy status pierwszego złącza (lub wszystkich, jeśli nie wiemy które)
-          const updatedConnectors = station.connectors.map((connector, index) => {
-            // Dla uproszczenia, jeśli trwa transakcja, pierwsze złącze jest w użyciu
-            if (index === 0 && connector.status !== 'FAULTED' && connector.status !== 'UNAVAILABLE') {
-              return {
-                ...connector,
-                status: 'CHARGING',
-              };
+        // Zaktualizuj status złączy na podstawie aktywnych transakcji
+        const updatedConnectors = station.connectors.map((connector) => {
+          // Sprawdź, czy istnieje aktywna transakcja dla tego konkretnego złącza
+          const activeTx = activeTransactions.find(
+            (tx) => tx.connectorId !== null && String(tx.connectorId) === String(connector.id)
+          );
+
+          let status = connector.status;
+
+          // Jeśli znaleziono aktywną transakcję dla tego złącza, ustaw status na 'CHARGING'
+          if (activeTx) {
+            // Nie nadpisuj statusu, jeśli złącze jest w stanie FAULTED lub UNAVAILABLE
+            if (connector.status !== 'FAULTED' && connector.status !== 'UNAVAILABLE') {
+              status = 'CHARGING';
             }
-            return connector;
-          });
+          }
 
           return {
-            ...station,
-            connectors: updatedConnectors,
+            ...connector,
+            status,
           };
-        }
+        });
 
-        return station;
+        return {
+          ...station,
+          connectors: updatedConnectors,
+        };
       })
     );
 
