@@ -196,14 +196,14 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
       
       // Ustaw startDate na początek dnia
       startDate.setHours(0, 0, 0, 0);
-      // Ustaw endDate na koniec dnia (23:59:59.999)
+      // ZAWSZE ustaw endDate na koniec dnia (23:59:59.999)
       endDate.setHours(23, 59, 59, 999);
     } else {
       // Domyślnie: dzisiejszy dzień
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       startDate = today;
-      // Ustaw endDate na koniec dzisiejszego dnia
+      // ZAWSZE ustaw endDate na koniec dzisiejszego dnia (23:59:59.999)
       const endOfToday = new Date(today);
       endOfToday.setHours(23, 59, 59, 999);
       endDate = endOfToday;
@@ -312,16 +312,17 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
 
     // Generowanie pełnej tablicy wszystkich dni w zakresie dat
     const chartData: Array<{ date: string; revenue: number; energy: number; sessions: number }> = [];
-    const currentDate = new Date(startDate);
     
-    // Utwórz datę końcową dla porównania (tylko data, bez czasu)
-    // endDate jest ustawione na koniec dnia (23:59:59.999), więc porównujemy tylko daty
-    const endDateForComparison = new Date(endDate);
-    endDateForComparison.setHours(0, 0, 0, 0);
+    // Użyj porównania dat w formacie YYYY-MM-DD (string) aby uniknąć problemów ze strefami czasowymi
+    const endDateKey = endDate.toISOString().split('T')[0];
+    
+    // Utwórz datę początkową dla iteracji (tylko data, bez czasu)
+    const currentDate = new Date(startDate);
+    currentDate.setHours(0, 0, 0, 0);
     
     // Iteruj przez wszystkie dni w zakresie (od startDate do endDate włącznie)
-    // Porównujemy tylko daty (bez czasu), aby uwzględnić cały dzisiejszy dzień
-    while (currentDate <= endDateForComparison) {
+    // Używamy porównania dat w formacie string (YYYY-MM-DD) aby uniknąć problemów ze strefami czasowymi
+    while (currentDate.toISOString().split('T')[0] <= endDateKey) {
       const dateKey = currentDate.toISOString().split('T')[0];
       const existingData = chartDataMap.get(dateKey);
       

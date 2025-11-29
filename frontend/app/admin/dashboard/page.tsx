@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import jsPDF from "jspdf";
 
 interface ChartDataPoint {
   date: string;
@@ -52,7 +53,7 @@ function StatCard({
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm font-medium text-slate-600">{title}</p>
         <div className={colorClasses[color]}>{icon}</div>
@@ -142,8 +143,12 @@ export default function AdminDashboard() {
       start.setDate(start.getDate() - 29);
     }
     
+    // EndDate zawsze do dzisiaj (23:59:59.999)
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+    
     setStartDate(start.toISOString().split("T")[0]);
-    setEndDate(today.toISOString().split("T")[0]);
+    setEndDate(end.toISOString().split("T")[0]);
   }, [timeRange]);
 
   // Sprawdź autentykację
@@ -179,6 +184,72 @@ export default function AdminDashboard() {
     }
   };
 
+  // Funkcja pomocnicza do usuwania polskich znaków
+  const removePolishChars = (str: string) => {
+    return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/Ł/g, "L").replace(/ł/g, "l");
+  };
+
+  // Funkcja do generowania raportu PDF
+  const generatePDF = () => {
+    if (!stats) return;
+
+    const doc = new jsPDF();
+    let yPos = 20;
+
+    // Nagłówek
+    doc.setFontSize(20);
+    doc.text(removePolishChars("Raport PlugBox"), 14, yPos);
+    yPos += 10;
+
+    // Zakres dat
+    doc.setFontSize(12);
+    const dateRange = `${startDate} - ${endDate}`;
+    doc.text(removePolishChars(`Zakres dat: ${dateRange}`), 14, yPos);
+    yPos += 15;
+
+    // Sekcja: Podsumowanie Finansowe
+    doc.setFontSize(16);
+    doc.text(removePolishChars("Podsumowanie Finansowe"), 14, yPos);
+    yPos += 10;
+
+    doc.setFontSize(11);
+    doc.text(removePolishChars(`Przychód: ${stats.totalRevenue.toFixed(2)} PLN`), 20, yPos);
+    yPos += 7;
+    doc.text(removePolishChars(`Energia: ${stats.totalEnergy.toFixed(2)} kWh`), 20, yPos);
+    yPos += 7;
+    doc.text(removePolishChars(`Liczba sesji: ${stats.totalSessions}`), 20, yPos);
+    yPos += 15;
+
+    // Sekcja: Efektywność
+    doc.setFontSize(16);
+    doc.text(removePolishChars("Efektywność"), 14, yPos);
+    yPos += 10;
+
+    doc.setFontSize(11);
+    doc.text(removePolishChars(`Średni koszt: ${stats.avgCost.toFixed(2)} PLN`), 20, yPos);
+    yPos += 7;
+    doc.text(removePolishChars(`Średnia kWh: ${stats.avgKwh.toFixed(2)} kWh`), 20, yPos);
+    yPos += 7;
+    doc.text(removePolishChars(`Średni czas ładowania: ${stats.avgDuration.toFixed(2)} min`), 20, yPos);
+    yPos += 15;
+
+    // Status Infrastruktury
+    doc.setFontSize(16);
+    doc.text(removePolishChars("Status Infrastruktury"), 14, yPos);
+    yPos += 10;
+
+    doc.setFontSize(11);
+    doc.text(removePolishChars(`Dostępne: ${stats.statusCounts.available} / ${stats.statusCounts.total}`), 20, yPos);
+    yPos += 7;
+    doc.text(removePolishChars(`Ładowanie: ${stats.statusCounts.charging}`), 20, yPos);
+    yPos += 7;
+    doc.text(removePolishChars(`Awaria: ${stats.statusCounts.faulted}`), 20, yPos);
+
+    // Zapisz PDF
+    doc.save("raport_dashboard.pdf");
+  };
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -192,8 +263,8 @@ export default function AdminDashboard() {
 
   return (
     <>
-      {/* Górna belka z nagłówkiem i DatePicker */}
-      <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      {/* Górna belka z nagłówkiem, DatePicker i przyciskiem PDF */}
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <h1 className="text-3xl font-bold text-slate-900">Pulpit</h1>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
@@ -220,231 +291,241 @@ export default function AdminDashboard() {
               className="px-4 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-slate-500 focus:border-transparent"
             />
           </div>
+          <button
+            onClick={generatePDF}
+            disabled={!stats}
+            className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            📄 Generuj Raport PDF
+          </button>
         </div>
       </div>
 
-      {/* Sekcja 1: Status Infrastruktury */}
-      <div className="mb-8">
-        <div className="mb-2">
-          <h2 className="text-xl font-semibold text-slate-900">Status Infrastruktury</h2>
-          <p className="text-sm text-slate-600 mt-1">{getFormattedDate()}</p>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <StatCard
-            title="Dostępne"
-            value={`${stats?.statusCounts.available ?? 0} / ${stats?.statusCounts.total ?? 0}`}
-            icon={
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            }
-            color="green"
-            isLoading={isLoadingStats}
-          />
-          <StatCard
-            title="Ładowanie"
-            value={stats?.statusCounts.charging ?? 0}
-            icon={
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            }
-            color="blue"
-            isLoading={isLoadingStats}
-          />
-          <StatCard
-            title="Awaria"
-            value={stats?.statusCounts.faulted ?? 0}
-            icon={
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-            }
-            color="red"
-            isLoading={isLoadingStats}
-          />
-        </div>
-      </div>
-
-      {/* Sekcja 2: Wyniki Finansowe - Wykres */}
-      <div className="mb-8">
-        <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
-          {/* Nagłówek z tytułem, tabs i dropdown */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
-            <h2 className="text-xl font-semibold text-slate-900">Raport Sprzedaży</h2>
-            <div className="flex flex-col sm:flex-row gap-3">
-              {/* Tabs */}
-              <div className="flex bg-slate-100 rounded-lg p-1">
-                <button
-                  onClick={() => setChartDataType("revenue")}
-                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                    chartDataType === "revenue"
-                      ? "bg-white text-slate-900 shadow-sm"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  Przychody
-                </button>
-                <button
-                  onClick={() => setChartDataType("energy")}
-                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                    chartDataType === "energy"
-                      ? "bg-white text-slate-900 shadow-sm"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  Sprzedana Energia
-                </button>
-                <button
-                  onClick={() => setChartDataType("sessions")}
-                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                    chartDataType === "sessions"
-                      ? "bg-white text-slate-900 shadow-sm"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  Liczba Sesji
-                </button>
-              </div>
-              {/* Dropdown zakresu czasu */}
-              <div className="flex bg-slate-100 rounded-lg p-1">
-                <button
-                  onClick={() => setTimeRange("week")}
-                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                    timeRange === "week"
-                      ? "bg-white text-slate-900 shadow-sm"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  Ten Tydzień
-                </button>
-                <button
-                  onClick={() => setTimeRange("30days")}
-                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                    timeRange === "30days"
-                      ? "bg-white text-slate-900 shadow-sm"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  Ostatnie 30 Dni
-                </button>
-                <button
-                  onClick={() => setTimeRange("month")}
-                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                    timeRange === "month"
-                      ? "bg-white text-slate-900 shadow-sm"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  Ten Miesiąc
-                </button>
-              </div>
-            </div>
+      {/* Główny kontener z grid-cols-12 */}
+      <div className="grid grid-cols-12 gap-6">
+        {/* Wiersz 1: Status Infrastruktury (col-span-12) */}
+        <div className="col-span-12 mb-4">
+          <div className="mb-2">
+            <h2 className="text-xl font-semibold text-slate-900">Status Infrastruktury</h2>
+            <p className="text-sm text-slate-600 mt-1">{getFormattedDate()}</p>
           </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <StatCard
+              title="Dostępne"
+              value={`${stats?.statusCounts.available ?? 0} / ${stats?.statusCounts.total ?? 0}`}
+              icon={
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              }
+              color="green"
+              isLoading={isLoadingStats}
+            />
+            <StatCard
+              title="Ładowanie"
+              value={stats?.statusCounts.charging ?? 0}
+              icon={
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              }
+              color="blue"
+              isLoading={isLoadingStats}
+            />
+            <StatCard
+              title="Awaria"
+              value={stats?.statusCounts.faulted ?? 0}
+              icon={
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              }
+              color="red"
+              isLoading={isLoadingStats}
+            />
+          </div>
+        </div>
 
-          {/* Wykres */}
-          {isLoadingStats ? (
-            <div className="h-96 flex items-center justify-center">
-              <div className="text-center">
-                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-slate-600"></div>
-                <p className="mt-4 text-slate-600">Ładowanie danych...</p>
+        {/* Wiersz 2: Wykres (col-span-8) i Efektywność (col-span-4) */}
+        <div className="col-span-12 lg:col-span-8">
+          <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+            {/* Nagłówek z tytułem, tabs i dropdown */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-4">
+              <h2 className="text-xl font-semibold text-slate-900">Raport Sprzedaży</h2>
+              <div className="flex flex-col sm:flex-row gap-3">
+                {/* Tabs */}
+                <div className="flex bg-slate-100 rounded-lg p-1">
+                  <button
+                    onClick={() => setChartDataType("revenue")}
+                    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                      chartDataType === "revenue"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Przychody
+                  </button>
+                  <button
+                    onClick={() => setChartDataType("energy")}
+                    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                      chartDataType === "energy"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Sprzedana Energia
+                  </button>
+                  <button
+                    onClick={() => setChartDataType("sessions")}
+                    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                      chartDataType === "sessions"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Liczba Sesji
+                  </button>
+                </div>
+                {/* Dropdown zakresu czasu */}
+                <div className="flex bg-slate-100 rounded-lg p-1">
+                  <button
+                    onClick={() => setTimeRange("week")}
+                    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                      timeRange === "week"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Ten Tydzień
+                  </button>
+                  <button
+                    onClick={() => setTimeRange("30days")}
+                    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                      timeRange === "30days"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Ostatnie 30 Dni
+                  </button>
+                  <button
+                    onClick={() => setTimeRange("month")}
+                    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                      timeRange === "month"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Ten Miesiąc
+                  </button>
+                </div>
               </div>
             </div>
-          ) : stats?.chartData && stats.chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={400}>
-              <BarChart data={stats.chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fill: "#64748b", fontSize: 12 }}
-                  tickFormatter={(value) => {
-                    const date = new Date(value);
-                    return `${date.getDate()}.${date.getMonth() + 1}`;
-                  }}
-                />
-                <YAxis
-                  tick={{ fill: "#64748b", fontSize: 12 }}
-                  tickFormatter={(value) => {
-                    if (chartDataType === "revenue") {
-                      return `${value} PLN`;
-                    } else if (chartDataType === "energy") {
-                      return `${value} kWh`;
-                    }
-                    return value.toString();
-                  }}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "white",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: "8px",
-                    padding: "8px 12px",
-                  }}
-                  labelFormatter={(value) => {
-                    const date = new Date(value);
-                    return date.toLocaleDateString("pl-PL", {
-                      day: "2-digit",
-                      month: "2-digit",
-                      year: "numeric",
-                    });
-                  }}
-                  formatter={(value: number) => {
-                    if (chartDataType === "revenue") {
-                      return [`${value.toFixed(2)} PLN`, "Przychód"];
-                    } else if (chartDataType === "energy") {
-                      return [`${value.toFixed(2)} kWh`, "Energia"];
-                    }
-                    return [value.toString(), "Sesje"];
-                  }}
-                />
-                <Bar
-                  dataKey={chartDataType}
-                  radius={[8, 8, 0, 0]}
-                >
-                  {stats.chartData.map((entry, index) => {
-                    const today = new Date().toISOString().split("T")[0];
-                    const isToday = entry.date === today;
-                    return (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={isToday ? "#3b82f6" : "#64748b"}
-                        opacity={isToday ? 1 : 0.7}
-                      />
-                    );
-                  })}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-96 flex items-center justify-center text-slate-500">
-              <p>Brak danych do wyświetlenia</p>
-            </div>
-          )}
-        </div>
-      </div>
 
-      {/* Sekcja 3: Efektywność */}
-      <div>
-        <h2 className="text-xl font-semibold text-slate-900 mb-4">Efektywność</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <SmallStatCard
-            title="Średni Koszt"
-            value={stats?.avgCost ?? 0}
-            unit="PLN"
-            isLoading={isLoadingStats}
-          />
-          <SmallStatCard
-            title="Średnia kWh"
-            value={stats?.avgKwh ?? 0}
-            unit="kWh"
-            isLoading={isLoadingStats}
-          />
-          <SmallStatCard
-            title="Średni Czas Ładowania"
-            value={stats?.avgDuration ?? 0}
-            unit="min"
-            isLoading={isLoadingStats}
-          />
+            {/* Wykres */}
+            {isLoadingStats ? (
+              <div className="h-[350px] flex items-center justify-center">
+                <div className="text-center">
+                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-slate-600"></div>
+                  <p className="mt-4 text-slate-600">Ładowanie danych...</p>
+                </div>
+              </div>
+            ) : stats?.chartData && stats.chartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={350}>
+                <BarChart data={stats.chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: "#64748b", fontSize: 12 }}
+                    tickFormatter={(value) => {
+                      const date = new Date(value);
+                      return `${date.getDate()}.${date.getMonth() + 1}`;
+                    }}
+                  />
+                  <YAxis
+                    tick={{ fill: "#64748b", fontSize: 12 }}
+                    tickFormatter={(value) => {
+                      if (chartDataType === "revenue") {
+                        return `${value} PLN`;
+                      } else if (chartDataType === "energy") {
+                        return `${value} kWh`;
+                      }
+                      return value.toString();
+                    }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "white",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "8px",
+                      padding: "8px 12px",
+                    }}
+                    labelFormatter={(value) => {
+                      const date = new Date(value);
+                      return date.toLocaleDateString("pl-PL", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                      });
+                    }}
+                    formatter={(value: number) => {
+                      if (chartDataType === "revenue") {
+                        return [`${value.toFixed(2)} PLN`, "Przychód"];
+                      } else if (chartDataType === "energy") {
+                        return [`${value.toFixed(2)} kWh`, "Energia"];
+                      }
+                      return [value.toString(), "Sesje"];
+                    }}
+                  />
+                  <Bar
+                    dataKey={chartDataType}
+                    radius={[8, 8, 0, 0]}
+                  >
+                    {stats.chartData.map((entry, index) => {
+                      const today = new Date().toISOString().split("T")[0];
+                      const isToday = entry.date === today;
+                      return (
+                        <Cell
+                          key={`cell-${index}`}
+                          fill={isToday ? "#1e293b" : "#334155"}
+                          opacity={isToday ? 1 : 0.8}
+                        />
+                      );
+                    })}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-[350px] flex items-center justify-center text-slate-500">
+                <p>Brak danych do wyświetlenia</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Sekcja Efektywność (col-span-4) */}
+        <div className="col-span-12 lg:col-span-4">
+          <h2 className="text-xl font-semibold text-slate-900 mb-4">Efektywność</h2>
+          <div className="space-y-4">
+            <SmallStatCard
+              title="Średni Koszt"
+              value={stats?.avgCost ?? 0}
+              unit="PLN"
+              isLoading={isLoadingStats}
+            />
+            <SmallStatCard
+              title="Średnia kWh"
+              value={stats?.avgKwh ?? 0}
+              unit="kWh"
+              isLoading={isLoadingStats}
+            />
+            <SmallStatCard
+              title="Średni Czas Ładowania"
+              value={stats?.avgDuration ?? 0}
+              unit="min"
+              isLoading={isLoadingStats}
+            />
+          </div>
         </div>
       </div>
     </>
