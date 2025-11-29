@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import axios from "axios";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import jsPDF from "jspdf";
@@ -100,8 +99,6 @@ type ChartDataType = "revenue" | "energy" | "sessions";
 type TimeRange = "week" | "month" | "30days";
 
 export default function AdminDashboard() {
-  const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const [isLoadingStats, setIsLoadingStats] = useState(true);
   const [startDate, setStartDate] = useState<string>("");
@@ -110,18 +107,6 @@ export default function AdminDashboard() {
   const [timeRange, setTimeRange] = useState<TimeRange>("week");
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
-
-  // Funkcja pomocnicza do odczytywania ciasteczka
-  const getCookie = (name: string): string | null => {
-    const nameEQ = name + "=";
-    const ca = document.cookie.split(";");
-    for (let i = 0; i < ca.length; i++) {
-      let c = ca[i];
-      while (c.charAt(0) === " ") c = c.substring(1, c.length);
-      if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
-    }
-    return null;
-  };
 
   // Funkcja do formatowania daty po polsku
   const getFormattedDate = () => {
@@ -163,22 +148,12 @@ export default function AdminDashboard() {
     setEndDate(end.toISOString().split("T")[0]);
   }, [timeRange]);
 
-  // Sprawdź autentykację
-  useEffect(() => {
-    const adminSession = getCookie("admin_session");
-    if (adminSession !== "true") {
-      router.push("/admin");
-    } else {
-      setIsAuthenticated(true);
-    }
-  }, [router]);
-
   // Pobierz statystyki przy zmianie dat
   useEffect(() => {
-    if (isAuthenticated && startDate && endDate) {
+    if (startDate && endDate) {
       fetchStats();
     }
-  }, [isAuthenticated, startDate, endDate]);
+  }, [startDate, endDate]);
 
   const fetchStats = async () => {
     setIsLoadingStats(true);
@@ -261,17 +236,6 @@ export default function AdminDashboard() {
     // Zapisz PDF
     doc.save("raport_dashboard.pdf");
   };
-
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-slate-600"></div>
-          <p className="mt-4 text-slate-600">Ładowanie...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <>

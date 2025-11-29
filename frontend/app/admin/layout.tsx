@@ -1,59 +1,14 @@
 "use client";
 
-import { useRouter, usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
-
-// Funkcja pomocnicza do odczytywania ciasteczka
-function getCookie(name: string): string | null {
-  const nameEQ = name + "=";
-  const ca = document.cookie.split(";");
-  for (let i = 0; i < ca.length; i++) {
-    let c = ca[i];
-    while (c.charAt(0) === " ") c = c.substring(1, c.length);
-    if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
-  }
-  return null;
-}
-
-// Funkcja pomocnicza do usuwania ciasteczka
-function deleteCookie(name: string) {
-  document.cookie = `${name}=;path=/;expires=Thu, 01 Jan 1970 00:00:00 UTC`;
-}
 
 export default function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const router = useRouter();
   const pathname = usePathname();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-
-  useEffect(() => {
-    const adminSession = getCookie("admin_session");
-    if (adminSession !== "true") {
-      router.push("/admin");
-    } else {
-      setIsAuthenticated(true);
-    }
-  }, [router]);
-
-  const handleLogout = () => {
-    deleteCookie("admin_session");
-    router.push("/admin");
-  };
-
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-slate-600"></div>
-          <p className="mt-4 text-slate-600">Ładowanie...</p>
-        </div>
-      </div>
-    );
-  }
 
   const isActive = (path: string) => pathname === path;
 
@@ -109,20 +64,6 @@ export default function AdminLayout({
             <span>Transakcje</span>
           </Link>
         </nav>
-
-        <div className="p-4 border-t border-slate-200">
-          <button
-            onClick={handleLogout}
-            className="w-full px-4 py-3 text-left text-red-600 hover:bg-red-50 rounded-lg transition-all font-medium"
-          >
-            <div className="flex items-center space-x-3">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-              <span>Wyloguj</span>
-            </div>
-          </button>
-        </div>
       </aside>
 
       {/* Main Content */}
