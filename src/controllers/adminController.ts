@@ -6,6 +6,11 @@ export const getStations = async (_req: Request, res: Response): Promise<void> =
   try {
     logInfo('[Admin] Fetching all stations');
     const stations = await prisma.station.findMany({
+      include: {
+        connectors: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
       orderBy: { createdAt: 'desc' },
     });
     res.json(stations);
@@ -251,15 +256,36 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
       }
     });
 
-    // Konwersja chartDataMap do tablicy obiektów
-    const chartData = Array.from(chartDataMap.entries())
-      .map(([date, data]) => ({
-        date,
-        revenue: Math.round(data.revenue * 100) / 100,
-        energy: Math.round(data.energy * 100) / 100,
-        sessions: data.sessions,
-      }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+    // Generowanie pełnej tablicy wszystkich dni w zakresie dat
+    const chartData: Array<{ date: string; revenue: number; energy: number; sessions: number }> = [];
+    const currentDate = new Date(startDate);
+    
+    // Iteruj przez wszystkie dni w zakresie (od startDate do endDate włącznie)
+    while (currentDate <= endDate) {
+      const dateKey = currentDate.toISOString().split('T')[0];
+      const existingData = chartDataMap.get(dateKey);
+      
+      if (existingData) {
+        // Jeśli są dane dla tego dnia, użyj ich
+        chartData.push({
+          date: dateKey,
+          revenue: Math.round(existingData.revenue * 100) / 100,
+          energy: Math.round(existingData.energy * 100) / 100,
+          sessions: existingData.sessions,
+        });
+      } else {
+        // Jeśli nie ma danych, wpisz 0
+        chartData.push({
+          date: dateKey,
+          revenue: 0,
+          energy: 0,
+          sessions: 0,
+        });
+      }
+      
+      // Przejdź do następnego dnia
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
 
     const totalSessions = completedTransactions.length;
 
@@ -377,6 +403,74 @@ export const updateStation = async (req: Request, res: Response): Promise<void> 
 
     res.status(500).json({
       error: 'Failed to update station',
+      message: error instanceof Error ? error.message : 'An unexpected error occurred',
+    });
+  }
+};
+
+export const updateConnector = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { pricePerKwh, status } = req.body;
+
+    if (!id) {
+      res.status(400).json({
+        error: 'Invalid request',
+        message: 'Connector ID is required',
+      });
+      return;
+    }
+
+    const updateData: {
+      pricePerKwh?: number;
+      status?: string;
+    } = {};
+
+    if (pricePerKwh !== undefined) {
+      if (typeof pricePerKwh !== 'number' || pricePerKwh <= 0) {
+        res.status(400).json({
+          error: 'Invalid request',
+          message: 'pricePerKwh must be a positive number',
+        });
+        return;
+      }
+      updateData.pricePerKwh = pricePerKwh;
+    }
+
+    if (status !== undefined && typeof status === 'string') {
+      updateData.status = status;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      res.status(400).json({
+        error: 'Invalid request',
+        message: 'At least one field (pricePerKwh or status) must be provided',
+      });
+      return;
+    }
+
+    logInfo('[Admin] Updating connector', { connectorId: id, updateData });
+
+    const connector = await prisma.connector.update({
+      where: { id },
+      data: updateData,
+    });
+
+    logInfo('[Admin] Connector updated successfully', { connectorId: connector.id });
+    res.json(connector);
+  } catch (error) {
+    logError('[Admin] Failed to update connector', error);
+
+    if (error instanceof Error && error.message.includes('Record to update does not exist')) {
+      res.status(404).json({
+        error: 'Connector not found',
+        message: 'The connector with the provided ID does not exist',
+      });
+      return;
+    }
+
+    res.status(500).json({
+      error: 'Failed to update connector',
       message: error instanceof Error ? error.message : 'An unexpected error occurred',
     });
   }

@@ -11,7 +11,7 @@ export const getAllStations = async (_req: Request, res: Response): Promise<void
   try {
     logInfo('[Stations] Fetching all stations with availability status');
     
-    // Pobierz wszystkie stacje
+    // Pobierz wszystkie stacje z złączami
     const stations = await prisma.station.findMany({
       select: {
         id: true,
@@ -21,6 +21,14 @@ export const getAllStations = async (_req: Request, res: Response): Promise<void
         latitude: true,
         longitude: true,
         pricePerKwh: true,
+        connectors: {
+          select: {
+            id: true,
+            type: true,
+            powerKw: true,
+            status: true,
+          },
+        },
       },
       orderBy: { name: 'asc' },
     });
@@ -50,6 +58,7 @@ export const getAllStations = async (_req: Request, res: Response): Promise<void
       longitude: station.longitude,
       pricePerKwh: station.pricePerKwh,
       status: busyStationIds.has(station.id) ? 'Busy' : 'Available',
+      connectors: station.connectors,
     }));
 
     logInfo('[Stations] Returning stations', { count: stationsWithStatus.length });

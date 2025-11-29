@@ -27,6 +27,12 @@ type Station = {
   pricePerKwh: number;
   status: "Available" | "Busy";
   distance?: number; // Dystans w km (dodawany po obliczeniu)
+  connectors?: Array<{
+    id: string;
+    type: string;
+    powerKw: number;
+    status: string;
+  }>;
 };
 
 // --- HOOK DO OPÓŹNIENIA (Debounce) ---
@@ -795,6 +801,31 @@ function HomeContent() {
               {stations.map((station) => {
                 const isAvailable = station.status === "Available";
                 
+                // Oblicz dostępność złączy
+                const connectors = station.connectors || [];
+                const totalConnectors = connectors.length;
+                const availableConnectors = connectors.filter(c => c.status === 'AVAILABLE').length;
+                
+                // Określ kolor pastylki dostępności
+                let availabilityBadgeColor = '';
+                let availabilityText = '';
+                if (totalConnectors === 0) {
+                  availabilityBadgeColor = 'bg-slate-100 text-slate-600';
+                  availabilityText = 'Brak danych';
+                } else if (availableConnectors === 0) {
+                  availabilityBadgeColor = 'bg-red-100 text-red-700';
+                  availabilityText = 'Zajęte';
+                } else if (availableConnectors === totalConnectors) {
+                  availabilityBadgeColor = 'bg-emerald-100 text-emerald-700';
+                  availabilityText = `${availableConnectors}/${totalConnectors} Wolne`;
+                } else {
+                  availabilityBadgeColor = 'bg-yellow-100 text-yellow-700';
+                  availabilityText = `${availableConnectors}/${totalConnectors} Wolne`;
+                }
+                
+                // Pobierz unikalne typy złączy
+                const connectorTypes = Array.from(new Set(connectors.map(c => c.type))).filter(Boolean);
+                
                 return (
                   <div
                     key={station.id}
@@ -821,6 +852,20 @@ function HomeContent() {
                           </div>
                         )}
 
+                        {/* Typy złączy */}
+                        {connectorTypes.length > 0 && (
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
+                            {connectorTypes.map((type, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2 py-1 text-xs font-bold bg-slate-100 text-slate-700 rounded-md"
+                              >
+                                {type}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
                         <div className="flex items-center gap-4 mt-3">
                           <span className="text-sm font-bold text-emerald-600">
                             od {station.pricePerKwh.toFixed(2)} zł/kWh
@@ -834,16 +879,13 @@ function HomeContent() {
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {/* Przycisk Nawiguj */}
-                        {station.latitude && station.longitude && (
-                          <button
-                            onClick={() => handleNavigateToStation(station)}
-                            className="w-12 h-12 flex items-center justify-center bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-all active:scale-[0.98]"
-                            title="Nawiguj do stacji"
-                          >
-                            <Map size={20} />
-                          </button>
+                        {/* Pastylka statusu dostępności */}
+                        {totalConnectors > 0 && (
+                          <span className={`px-3 py-2 rounded-lg text-xs font-bold ${availabilityBadgeColor}`}>
+                            {availabilityText}
+                          </span>
                         )}
+                        
                         {/* Przycisk Wybierz */}
                         <button
                           onClick={() => handleSelectStation(station.id)}
@@ -856,6 +898,17 @@ function HomeContent() {
                         >
                           Wybierz
                         </button>
+                        
+                        {/* Przycisk Nawiguj */}
+                        {station.latitude && station.longitude && (
+                          <button
+                            onClick={() => handleNavigateToStation(station)}
+                            className="w-12 h-12 flex items-center justify-center bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-all active:scale-[0.98]"
+                            title="Nawiguj do stacji"
+                          >
+                            <Navigation size={20} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
