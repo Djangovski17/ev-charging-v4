@@ -106,6 +106,20 @@ export default function TransactionsPage() {
     });
   };
 
+  const formatDateTimeForPDF = (dateString: string) => {
+    const date = new Date(dateString);
+    const dateStr = date.toLocaleDateString("pl-PL", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const timeStr = date.toLocaleTimeString("pl-PL", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return `${dateStr} ${timeStr}`;
+  };
+
   // Funkcja pomocnicza do usuwania polskich znaków
   const removePolishChars = (str: string) => {
     return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -164,8 +178,8 @@ export default function TransactionsPage() {
         }
       }
 
-      // Generuj PDF
-      const doc = new jsPDF();
+      // Generuj PDF w orientacji poziomej (landscape)
+      const doc = new jsPDF({ orientation: 'landscape' });
       
       // Nagłówek
       doc.setFontSize(18);
@@ -197,13 +211,13 @@ export default function TransactionsPage() {
           : tx.status;
         
         return [
-          tx.stripePaymentId.substring(0, 20) + (tx.stripePaymentId.length > 20 ? "..." : ""), // ID (Stripe) - skrócone
+          tx.stripePaymentId, // ID (Stripe) - pełne, bez ucinania
           removePolishChars(tx.station.name), // Stacja
           removePolishChars(connectorInfo), // Złącze
           `${displayCost.toFixed(2)} PLN`, // Kwota
           `${tx.energyKwh.toFixed(2)} kWh`, // Energia
           removePolishChars(statusText), // Status
-          formatDateForPDF(tx.createdAt), // Data
+          formatDateTimeForPDF(tx.createdAt), // Data z czasem
         ];
       });
 
@@ -220,18 +234,19 @@ export default function TransactionsPage() {
           fillColor: [241, 245, 249], // slate-100
           textColor: [51, 65, 85], // slate-700
           fontStyle: "bold",
+          fontSize: 8,
         },
         alternateRowStyles: {
           fillColor: [248, 250, 252], // slate-50
         },
         columnStyles: {
-          0: { cellWidth: 35 }, // ID (Stripe)
+          0: { cellWidth: 45, fontSize: 7 }, // ID (Stripe) - pełne ID z mniejszą czcionką
           1: { cellWidth: 40 }, // Stacja
-          2: { cellWidth: 35 }, // Złącze
-          3: { cellWidth: 25 }, // Kwota
-          4: { cellWidth: 25 }, // Energia
-          5: { cellWidth: 25 }, // Status
-          6: { cellWidth: 25 }, // Data
+          2: { cellWidth: 40 }, // Złącze
+          3: { cellWidth: 30 }, // Kwota
+          4: { cellWidth: 30 }, // Energia
+          5: { cellWidth: 30 }, // Status
+          6: { cellWidth: 50 }, // Data - więcej miejsca dla daty z czasem
         },
       });
 

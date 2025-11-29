@@ -240,7 +240,7 @@ export default function AdminDashboard() {
     yPos += 10;
 
     doc.setFontSize(11);
-    doc.text(removePolishChars(`Dostępne: ${stats.statusCounts.available} / ${stats.statusCounts.total}`), 20, yPos);
+    doc.text(removePolishChars(`Dostępne Złącza: ${stats.statusCounts.available} / ${stats.statusCounts.total}`), 20, yPos);
     yPos += 7;
     doc.text(removePolishChars(`Ładowanie: ${stats.statusCounts.charging}`), 20, yPos);
     yPos += 7;
@@ -311,7 +311,7 @@ export default function AdminDashboard() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <StatCard
-              title="Dostępne"
+              title="Dostępne Złącza"
               value={`${stats?.statusCounts.available ?? 0} / ${stats?.statusCounts.total ?? 0}`}
               icon={
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -227,15 +227,35 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
     }
 
     // ===== ZŁĄCZA =====
-    // Total Connectors - całkowita liczba stacji (każda stacja = jedno złącze)
-    const totalConnectors = await prisma.station.count();
+    // Total Connectors - całkowita liczba złączy w systemie
+    const totalConnectors = await prisma.connector.count();
 
-    // Status Counts - liczniki statusów stacji
-    const stations = await prisma.station.findMany({
+    // Pobierz wszystkie złącza
+    const connectors = await prisma.connector.findMany({
       select: {
+        id: true,
         status: true,
       },
     });
+
+    // Pobierz wszystkie aktywne transakcje (PENDING lub CHARGING)
+    const activeTransactions = await prisma.transaction.findMany({
+      where: {
+        status: {
+          in: ['PENDING', 'CHARGING'],
+        },
+      },
+      select: {
+        connectorId: true,
+      },
+    });
+
+    // Utwórz Set z ID złączy które mają aktywną transakcję
+    const connectorsWithActiveTransactions = new Set(
+      activeTransactions
+        .map((tx) => tx.connectorId)
+        .filter((id): id is string => id !== null)
+    );
 
     const statusCounts = {
       available: 0,
@@ -244,15 +264,25 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
       total: totalConnectors,
     };
 
-    stations.forEach((station) => {
-      const status = station.status.toUpperCase();
-      if (status === 'AVAILABLE') {
+    // Policz statusy złączy
+    connectors.forEach((connector) => {
+      const status = connector.status.toUpperCase();
+      const hasActiveTransaction = connectorsWithActiveTransactions.has(connector.id);
+
+      // Złącze jest dostępne jeśli ma status AVAILABLE i nie ma aktywnej transakcji
+      if (status === 'AVAILABLE' && !hasActiveTransaction) {
         statusCounts.available++;
-      } else if (status === 'CHARGING' || status === 'OCCUPIED' || status === 'PENDING') {
+      } 
+      // Złącze jest zajęte (charging) jeśli ma aktywną transakcję lub status CHARGING/OCCUPIED/PENDING
+      else if (hasActiveTransaction || status === 'CHARGING' || status === 'OCCUPIED' || status === 'PENDING') {
         statusCounts.charging++;
-      } else if (status === 'UNAVAILABLE' || status === 'FAILED' || status === 'FAULTED') {
+      } 
+      // Złącze jest uszkodzone jeśli ma status FAULTED/UNAVAILABLE/FAILED
+      else if (status === 'FAULTED' || status === 'UNAVAILABLE' || status === 'FAILED') {
         statusCounts.faulted++;
       }
+      // Jeśli złącze ma status AVAILABLE ale ma aktywną transakcję, powinno być w charging
+      // (ten przypadek jest już obsłużony wyżej)
     });
 
     // ===== FINANSE I WOLUMEN (w zadanym okresie) =====
