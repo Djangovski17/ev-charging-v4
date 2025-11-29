@@ -3,6 +3,25 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
+// Funkcja pomocnicza do ustawiania ciasteczka
+function setCookie(name: string, value: string, days: number) {
+  const expires = new Date();
+  expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000);
+  document.cookie = `${name}=${value};path=/;expires=${expires.toUTCString()}`;
+}
+
+// Funkcja pomocnicza do odczytywania ciasteczka
+function getCookie(name: string): string | null {
+  const nameEQ = name + "=";
+  const ca = document.cookie.split(";");
+  for (let i = 0; i < ca.length; i++) {
+    let c = ca[i];
+    while (c.charAt(0) === " ") c = c.substring(1, c.length);
+    if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+  }
+  return null;
+}
+
 export default function AdminLogin() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -12,8 +31,8 @@ export default function AdminLogin() {
 
   useEffect(() => {
     // Sprawdź czy użytkownik jest już zalogowany
-    const isAuthenticated = localStorage.getItem("admin_authenticated");
-    if (isAuthenticated === "true") {
+    const adminSession = getCookie("admin_session");
+    if (adminSession === "true") {
       router.push("/admin/dashboard");
     }
   }, [router]);
@@ -24,8 +43,8 @@ export default function AdminLogin() {
     setIsLoading(true);
 
     // Hardcoded credentials dla MVP
-    if (email === "admin@plugbox.com" && password === "admin123") {
-      localStorage.setItem("admin_authenticated", "true");
+    if (email === "admin@plugbox.com" && password === "plugbox2025") {
+      setCookie("admin_session", "true", 1); // 1 dzień
       router.push("/admin/dashboard");
     } else {
       setError("Nieprawidłowy email lub hasło");

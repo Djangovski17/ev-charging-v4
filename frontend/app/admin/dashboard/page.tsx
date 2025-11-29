@@ -111,6 +111,18 @@ export default function AdminDashboard() {
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
+  // Funkcja pomocnicza do odczytywania ciasteczka
+  const getCookie = (name: string): string | null => {
+    const nameEQ = name + "=";
+    const ca = document.cookie.split(";");
+    for (let i = 0; i < ca.length; i++) {
+      let c = ca[i];
+      while (c.charAt(0) === " ") c = c.substring(1, c.length);
+      if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+    }
+    return null;
+  };
+
   // Funkcja do formatowania daty po polsku
   const getFormattedDate = () => {
     const today = new Date();
@@ -153,8 +165,8 @@ export default function AdminDashboard() {
 
   // Sprawdź autentykację
   useEffect(() => {
-    const auth = localStorage.getItem("admin_authenticated");
-    if (auth !== "true") {
+    const adminSession = getCookie("admin_session");
+    if (adminSession !== "true") {
       router.push("/admin");
     } else {
       setIsAuthenticated(true);

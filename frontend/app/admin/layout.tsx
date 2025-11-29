@@ -4,6 +4,23 @@ import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+// Funkcja pomocnicza do odczytywania ciasteczka
+function getCookie(name: string): string | null {
+  const nameEQ = name + "=";
+  const ca = document.cookie.split(";");
+  for (let i = 0; i < ca.length; i++) {
+    let c = ca[i];
+    while (c.charAt(0) === " ") c = c.substring(1, c.length);
+    if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+  }
+  return null;
+}
+
+// Funkcja pomocnicza do usuwania ciasteczka
+function deleteCookie(name: string) {
+  document.cookie = `${name}=;path=/;expires=Thu, 01 Jan 1970 00:00:00 UTC`;
+}
+
 export default function AdminLayout({
   children,
 }: {
@@ -14,8 +31,8 @@ export default function AdminLayout({
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    const auth = localStorage.getItem("admin_authenticated");
-    if (auth !== "true") {
+    const adminSession = getCookie("admin_session");
+    if (adminSession !== "true") {
       router.push("/admin");
     } else {
       setIsAuthenticated(true);
@@ -23,7 +40,7 @@ export default function AdminLayout({
   }, [router]);
 
   const handleLogout = () => {
-    localStorage.removeItem("admin_authenticated");
+    deleteCookie("admin_session");
     router.push("/admin");
   };
 
