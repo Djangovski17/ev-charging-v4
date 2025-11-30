@@ -299,7 +299,7 @@ export default function StationsPage() {
       status: newConnector.status,
     };
 
-    console.log('Wysyłam złącze:', { stationId: editingStation.id, ...connectorData });
+    console.log('Wysyłam złącze:', connectorData);
 
     setIsAddingConnector(true);
     try {
@@ -1344,83 +1344,83 @@ export default function StationsPage() {
                   Dane stacji
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Nazwa
-                    </label>
-                    <input
-                      type="text"
-                      value={editingStation.name}
-                      onChange={(e) =>
-                        setEditingStation({ ...editingStation, name: e.target.value })
-                      }
-                      required
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
-                    />
-                  </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Nazwa
+                </label>
+                <input
+                  type="text"
+                  value={editingStation.name}
+                  onChange={(e) =>
+                    setEditingStation({ ...editingStation, name: e.target.value })
+                  }
+                  required
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                />
+              </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Adres
-                    </label>
-                    <input
-                      type="text"
-                      value={editingStation.address || ""}
-                      onChange={(e) =>
-                        setEditingStation({ ...editingStation, address: e.target.value || null })
-                      }
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
-                    />
-                  </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Adres
+                </label>
+                <input
+                  type="text"
+                  value={editingStation.address || ""}
+                  onChange={(e) =>
+                    setEditingStation({ ...editingStation, address: e.target.value || null })
+                  }
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                />
+              </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Miasto
-                    </label>
-                    <input
-                      type="text"
-                      value={editingStation.city || ""}
-                      onChange={(e) =>
-                        setEditingStation({ ...editingStation, city: e.target.value || null })
-                      }
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
-                    />
-                  </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Miasto
+                </label>
+                <input
+                  type="text"
+                  value={editingStation.city || ""}
+                  onChange={(e) =>
+                    setEditingStation({ ...editingStation, city: e.target.value || null })
+                  }
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                />
+              </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Latitude
-                    </label>
-                    <input
-                      type="number"
-                      step="any"
-                      value={editingStation.latitude || ""}
-                      onChange={(e) =>
-                        setEditingStation({
-                          ...editingStation,
-                          latitude: e.target.value ? parseFloat(e.target.value) : null,
-                        })
-                      }
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
-                    />
-                  </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Latitude
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  value={editingStation.latitude || ""}
+                  onChange={(e) =>
+                    setEditingStation({
+                      ...editingStation,
+                      latitude: e.target.value ? parseFloat(e.target.value) : null,
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                />
+              </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Longitude
-                    </label>
-                    <input
-                      type="number"
-                      step="any"
-                      value={editingStation.longitude || ""}
-                      onChange={(e) =>
-                        setEditingStation({
-                          ...editingStation,
-                          longitude: e.target.value ? parseFloat(e.target.value) : null,
-                        })
-                      }
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
-                    />
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Longitude
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  value={editingStation.longitude || ""}
+                  onChange={(e) =>
+                    setEditingStation({
+                      ...editingStation,
+                      longitude: e.target.value ? parseFloat(e.target.value) : null,
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                />
                   </div>
                 </div>
               </div>
