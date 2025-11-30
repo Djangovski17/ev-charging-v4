@@ -178,7 +178,7 @@ export const createStation = async (req: Request, res: Response): Promise<void> 
         powerKw: connector.powerKw,
         pricePerKwh: connector.pricePerKwh,
         status: connector.status,
-        // name nie jest w schemacie Connector, więc pomijamy
+        name: connector.name ? connector.name.trim() : undefined,
       };
     });
 
@@ -863,13 +863,25 @@ export const deleteConnector = async (req: Request, res: Response): Promise<void
 
 export const createConnector = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { stationId, type, powerKw, pricePerKwh, status } = req.body;
+    const { stationId, name, type, powerKw, pricePerKwh, status } = req.body;
+
+    logInfo('[Admin] Creating connector', { stationId, name, type, powerKw, pricePerKwh, status });
 
     // Walidacja wymaganych pól
     if (!stationId || typeof stationId !== 'string') {
+      logError('[Admin] Invalid stationId in createConnector', { stationId, type: typeof stationId });
       res.status(400).json({
         error: 'Invalid request',
         message: 'stationId is required and must be a string',
+      });
+      return;
+    }
+
+    // name jest opcjonalne (może być undefined), ale jeśli jest podane, musi być stringiem
+    if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+      res.status(400).json({
+        error: 'Invalid request',
+        message: 'name must be a non-empty string if provided',
       });
       return;
     }
@@ -927,18 +939,41 @@ export const createConnector = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    // Utwórz złącze
+    // Utwórz złącze - użyj tej samej logiki co w createStation
+    const connectorData: {
+      stationId: string;
+      name?: string;
+      type: string;
+      powerKw: number;
+      pricePerKwh: number;
+      status: string;
+    } = {
+      stationId,
+      type,
+      powerKw,
+      pricePerKwh,
+      status: status || 'AVAILABLE',
+    };
+
+    // Dodaj name tylko jeśli jest podane (tak jak w createStation)
+    if (name !== undefined && name.trim()) {
+      connectorData.name = name.trim();
+    }
+
+    logInfo('[Admin] Creating connector with data', connectorData);
+
     const connector = await prisma.connector.create({
-      data: {
-        stationId,
-        type,
-        powerKw,
-        pricePerKwh,
-        status: status || 'AVAILABLE',
-      },
+      data: connectorData,
     });
 
-    logInfo('[Admin] Connector created successfully', { connectorId: connector.id, stationId });
+    logInfo('[Admin] Connector created successfully', { 
+      connectorId: connector.id, 
+      stationId: connector.stationId,
+      type: connector.type,
+      powerKw: connector.powerKw,
+      pricePerKwh: connector.pricePerKwh
+    });
+    
     res.status(201).json(connector);
   } catch (error) {
     logError('[Admin] Failed to create connector', error);

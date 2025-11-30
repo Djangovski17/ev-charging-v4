@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import axios from "axios";
 
 interface Connector {
@@ -29,6 +30,7 @@ interface Station {
 }
 
 export default function StationsPage() {
+  const router = useRouter();
   const [stations, setStations] = useState<Station[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [expandedStations, setExpandedStations] = useState<Set<string>>(new Set());
@@ -42,6 +44,7 @@ export default function StationsPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showAddConnectorForm, setShowAddConnectorForm] = useState(false);
   const [newConnector, setNewConnector] = useState({
+    name: "",
     type: "Type2",
     powerKw: "",
     pricePerKwh: "",
@@ -81,7 +84,13 @@ export default function StationsPage() {
   const fetchStations = async () => {
     setIsLoading(true);
     try {
-      const response = await axios.get(`${API_URL}/admin/stations`);
+      // Dodaj timestamp do URL, żeby uniknąć cache'owania
+      const response = await axios.get(`${API_URL}/admin/stations`, {
+        params: { _t: Date.now() },
+        headers: {
+          'Cache-Control': 'no-cache',
+        },
+      });
       setStations(response.data);
     } catch (error) {
       console.error("Error fetching stations:", error);
@@ -218,6 +227,7 @@ export default function StationsPage() {
     setSelectedConnectors(new Set()); // Reset zaznaczonych złączy przy otwieraniu modalu
     setShowAddConnectorForm(false); // Reset formularza dodawania złącza
     setNewConnector({
+      name: "",
       type: "Type2",
       powerKw: "",
       pricePerKwh: "",
@@ -253,6 +263,7 @@ export default function StationsPage() {
     setSelectedConnectors(new Set());
     setShowAddConnectorForm(false);
     setNewConnector({
+      name: "",
       type: "Type2",
       powerKw: "",
       pricePerKwh: "",
@@ -264,7 +275,7 @@ export default function StationsPage() {
     e.preventDefault();
     if (!editingStation) return;
 
-    // Walidacja
+    // Walidacja - użyj tej samej logiki co w handleAddStationSubmit
     if (!newConnector.type) {
       alert("Typ złącza jest wymagany");
       return;
@@ -278,26 +289,49 @@ export default function StationsPage() {
       return;
     }
 
+    // Użyj identycznej struktury danych jak w handleAddStationSubmit
+    const connectorData = {
+      stationId: editingStation.id,
+      name: newConnector.name.trim() || undefined,
+      type: newConnector.type,
+      powerKw: parseInt(newConnector.powerKw),
+      pricePerKwh: parseFloat(newConnector.pricePerKwh),
+      status: newConnector.status,
+    };
+
+    console.log('Wysyłam złącze:', { stationId: editingStation.id, ...connectorData });
+
     setIsAddingConnector(true);
     try {
-      await axios.post(`${API_URL}/admin/connector`, {
-        stationId: editingStation.id,
-        type: newConnector.type,
-        powerKw: parseInt(newConnector.powerKw),
-        pricePerKwh: parseFloat(newConnector.pricePerKwh),
-        status: newConnector.status,
-      });
+      const response = await axios.post(`${API_URL}/admin/connector`, connectorData);
+      
+      console.log('Złącze dodane pomyślnie:', response.data);
 
-      // Odśwież dane stacji w modalu
-      const response = await axios.get(`${API_URL}/admin/stations`);
-      const updatedStation = response.data.find((s: Station) => s.id === editingStation.id);
+      // Odśwież dane stacji w modalu - pobierz świeże dane z API (bez cache)
+      const stationsResponse = await axios.get(`${API_URL}/admin/stations`, {
+        params: { _t: Date.now() },
+        headers: {
+          'Cache-Control': 'no-cache',
+        },
+      });
+      const updatedStation = stationsResponse.data.find((s: Station) => s.id === editingStation.id);
+      
       if (updatedStation) {
+        console.log('Zaktualizowano stację w modalu:', updatedStation);
         setEditingStation(updatedStation);
+      } else {
+        console.error('Nie znaleziono zaktualizowanej stacji w odpowiedzi');
+        // Fallback: odśwież całą listę stacji
+        await fetchStations();
       }
+
+      // Odśwież router Next.js (jeśli dostępny)
+      router.refresh();
 
       // Ukryj formularz i zresetuj dane
       setShowAddConnectorForm(false);
       setNewConnector({
+        name: "",
         type: "Type2",
         powerKw: "",
         pricePerKwh: "",
@@ -318,6 +352,7 @@ export default function StationsPage() {
   const handleAddConnectorCancel = () => {
     setShowAddConnectorForm(false);
     setNewConnector({
+      name: "",
       type: "Type2",
       powerKw: "",
       pricePerKwh: "",
@@ -1409,7 +1444,21 @@ export default function StationsPage() {
                 {showAddConnectorForm && (
                   <div className="mb-4 p-4 border border-slate-200 rounded-lg bg-slate-50">
                     <form onSubmit={handleAddConnectorSubmit} className="space-y-3">
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">
+                            ID / Nazwa Złącza
+                          </label>
+                          <input
+                            type="text"
+                            value={newConnector.name}
+                            onChange={(e) =>
+                              setNewConnector({ ...newConnector, name: e.target.value })
+                            }
+                            className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-slate-500"
+                            placeholder="np. 1 lub A (opcjonalne)"
+                          />
+                        </div>
                         <div>
                           <label className="block text-xs font-medium text-slate-600 mb-1">
                             Typ <span className="text-red-500">*</span>

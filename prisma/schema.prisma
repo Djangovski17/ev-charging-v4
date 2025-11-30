@@ -51,6 +51,7 @@ model Connector {
   stationId    String
   station      Station       @relation(fields: [stationId], references: [id])
   transactions Transaction[]
+  name         String?
   type         String   
   powerKw      Int 
   status       String        @default("AVAILABLE")
