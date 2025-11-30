@@ -5,6 +5,7 @@ const router = Router();
 
 router.get('/stations', getStations);
 router.post('/stations', createStation);
+router.post('/station', createStation); // Nowy endpoint zgodny z wymaganiami
 router.put('/stations/:id', updateStation);
 router.put('/connectors/:id', updateConnector);
 router.get('/transactions', getTransactions);

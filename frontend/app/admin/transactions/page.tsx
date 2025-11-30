@@ -301,23 +301,31 @@ export default function TransactionsPage() {
   return (
     <div>
       <div className="mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-3xl font-bold text-slate-900">Transakcje</h1>
-          <button
-            onClick={handleOpenModal}
-            className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors flex items-center gap-2"
-          >
-            📄 Wygeneruj Raport
-          </button>
-        </div>
-        <div className="flex justify-center">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Szukaj ID, stacji, statusu..."
-            className="w-full max-w-lg border border-slate-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-slate-500 focus:border-transparent"
-          />
+        <h1 className="text-3xl font-bold text-slate-900 mb-4">Transakcje</h1>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center mb-6">
+          {/* Lewa kolumna - pusta */}
+          <div></div>
+          
+          {/* Środkowa kolumna - Wyszukiwarka */}
+          <div className="col-start-2 flex justify-center">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Szukaj ID, stacji, statusu..."
+              className="w-full max-w-lg border border-slate-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-slate-500 focus:border-transparent"
+            />
+          </div>
+          
+          {/* Prawa kolumna - Przycisk Wygeneruj Raport */}
+          <div className="flex justify-end">
+            <button
+              onClick={handleOpenModal}
+              className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors flex items-center gap-2"
+            >
+              📄 Wygeneruj Raport
+            </button>
+          </div>
         </div>
       </div>
 

@@ -101,7 +101,7 @@ const CheckoutForm = ({ amount, onSuccess, onCancel, stationName }: { amount: nu
       )}
 
       {/* PRZYCISKI AKCJI */}
-      <div className="grid grid-cols-2 gap-3 pt-2">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
         <button
           type="button"
           onClick={onCancel}
@@ -205,6 +205,7 @@ function HomeContent() {
   const [priceSort, setPriceSort] = useState<"asc" | "desc" | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "available">("all");
   const [locationSort, setLocationSort] = useState(false); // Czy sortować po lokalizacji (najbliższe)
+  const [searchQuery, setSearchQuery] = useState(""); // Wyszukiwarka stacji
 
   const PRICE_PER_KWH = pricePerKwh;
 
@@ -358,6 +359,16 @@ function HomeContent() {
     if (!stationId && allStations.length > 0) {
       let filteredStations = [...allStations];
 
+      // Filtrowanie po wyszukiwarce (nazwa lub miasto)
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase().trim();
+        filteredStations = filteredStations.filter(station => {
+          const nameMatch = station.name.toLowerCase().includes(query);
+          const cityMatch = station.city?.toLowerCase().includes(query) || false;
+          return nameMatch || cityMatch;
+        });
+      }
+
       // Filtrowanie po statusie
       if (statusFilter === "available") {
         filteredStations = filteredStations.filter(s => s.status === "Available");
@@ -408,7 +419,7 @@ function HomeContent() {
 
       setStations(filteredStations);
     }
-  }, [stationId, allStations, priceSort, statusFilter, locationSort, userLocation]);
+  }, [stationId, allStations, priceSort, statusFilter, locationSort, userLocation, searchQuery]);
 
   // Funkcja do pobrania lokalizacji użytkownika
   const handleRequestLocation = () => {
@@ -738,7 +749,7 @@ function HomeContent() {
   // 0. WIDOK WYBORU STACJI (gdy brak stationId)
   if (!stationId) {
     return (
-      <div className="min-h-screen bg-slate-50 p-4 font-sans text-slate-900">
+      <div className="min-h-screen bg-slate-50 px-4 py-4 font-sans text-slate-900">
         <div className="max-w-2xl mx-auto">
           {/* Nagłówek */}
           <div className="text-center mb-6 mt-8">
@@ -774,6 +785,17 @@ function HomeContent() {
             </div>
           )}
 
+          {/* Wyszukiwarka stacji */}
+          <div className="mb-4">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Szukaj stacji po nazwie lub mieście..."
+              className="w-full px-4 py-3 bg-slate-100 text-slate-600 rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-slate-500 focus:bg-white border border-slate-200"
+            />
+          </div>
+
           {/* Sekcja Filtrów */}
           <div className="mb-4">
             <button
@@ -792,10 +814,10 @@ function HomeContent() {
                 {/* Filtrowanie po cenie */}
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">Cena</label>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <button
                       onClick={() => setPriceSort(priceSort === "asc" ? null : "asc")}
-                      className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all ${
+                      className={`flex-1 min-w-[120px] py-2 px-4 rounded-lg font-medium transition-all ${
                         priceSort === "asc"
                           ? "bg-emerald-600 text-white"
                           : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -805,7 +827,7 @@ function HomeContent() {
                     </button>
                     <button
                       onClick={() => setPriceSort(priceSort === "desc" ? null : "desc")}
-                      className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all ${
+                      className={`flex-1 min-w-[120px] py-2 px-4 rounded-lg font-medium transition-all ${
                         priceSort === "desc"
                           ? "bg-emerald-600 text-white"
                           : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -819,10 +841,10 @@ function HomeContent() {
                 {/* Filtrowanie po statusie */}
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">Status</label>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <button
                       onClick={() => setStatusFilter("all")}
-                      className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all ${
+                      className={`flex-1 min-w-[120px] py-2 px-4 rounded-lg font-medium transition-all ${
                         statusFilter === "all"
                           ? "bg-emerald-600 text-white"
                           : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -832,7 +854,7 @@ function HomeContent() {
                     </button>
                     <button
                       onClick={() => setStatusFilter("available")}
-                      className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all ${
+                      className={`flex-1 min-w-[120px] py-2 px-4 rounded-lg font-medium transition-all ${
                         statusFilter === "available"
                           ? "bg-emerald-600 text-white"
                           : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -931,7 +953,7 @@ function HomeContent() {
                 return (
                   <div
                     key={station.id}
-                    className="bg-white rounded-2xl border-2 border-slate-100 hover:border-emerald-500 hover:shadow-lg hover:shadow-emerald-500/10 transition-all p-6"
+                    className="w-full md:w-auto bg-white rounded-2xl border-2 border-slate-100 hover:border-emerald-500 hover:shadow-lg hover:shadow-emerald-500/10 transition-all p-6"
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1">
@@ -964,7 +986,7 @@ function HomeContent() {
                           </div>
                         )}
 
-                        <div className="flex items-center gap-4 mt-3">
+                        <div className="flex flex-wrap items-center gap-2 md:gap-4 mt-3">
                           <span className="text-sm font-bold text-emerald-600">
                             od {station.pricePerKwh.toFixed(2)} zł/kWh
                           </span>
@@ -976,7 +998,7 @@ function HomeContent() {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         {/* Pastylka statusu dostępności */}
                         {connectors.length > 0 && (
                           <span className={`px-3 py-2 rounded-lg text-xs font-bold ${availabilityBadgeColor}`}>
@@ -988,7 +1010,7 @@ function HomeContent() {
                         <button
                           onClick={() => handleSelectStation(station.id)}
                           disabled={!isAvailable}
-                          className={`px-6 py-3 rounded-xl font-bold transition-all ${
+                          className={`px-4 md:px-6 py-3 rounded-xl font-bold transition-all text-sm md:text-base ${
                             isAvailable
                               ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 active:scale-[0.98]'
                               : 'bg-slate-200 text-slate-500 cursor-not-allowed opacity-50'
@@ -1001,10 +1023,10 @@ function HomeContent() {
                         {station.latitude && station.longitude && (
                           <button
                             onClick={() => handleNavigateToStation(station)}
-                            className="w-12 h-12 flex items-center justify-center bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-all active:scale-[0.98]"
+                            className="w-10 h-10 md:w-12 md:h-12 flex items-center justify-center bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-all active:scale-[0.98]"
                             title="Nawiguj do stacji"
                           >
-                            <Navigation size={20} />
+                            <Navigation size={18} className="md:w-5 md:h-5" />
                           </button>
                         )}
                       </div>
@@ -1022,7 +1044,7 @@ function HomeContent() {
   // Ekran ładowania podczas sprawdzania sesji (tylko gdy jest stationId)
   if (isLoading && stationId) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center p-4 font-sans">
+      <div className="min-h-screen bg-white flex items-center justify-center px-4 py-4 font-sans">
         <div className="text-center space-y-6">
           <div className="w-20 h-20 bg-emerald-100 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
             <Zap size={40} className="text-emerald-600 animate-pulse" fill="currentColor" />
@@ -1039,7 +1061,7 @@ function HomeContent() {
   // 1. WYBÓR ZŁĄCZA (gdy jest stationId ale viewState === "idle")
   if (viewState === "idle" && stationId) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans text-slate-900">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-4 font-sans text-slate-900">
         <div className="w-full max-w-md bg-white rounded-[2rem] shadow-2xl shadow-slate-200/50 overflow-hidden border border-slate-100">
           <div className="bg-white p-8 pb-4 border-b border-slate-50">
             <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm">
@@ -1128,7 +1150,7 @@ function HomeContent() {
   // 2. DOKONAJ PRZEDPŁATY
   if (viewState === "payment") {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans text-slate-900">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-4 font-sans text-slate-900">
         <div className="w-full max-w-md bg-white rounded-[2rem] shadow-2xl shadow-slate-200/50 overflow-hidden border border-slate-100">
           
           <div className="p-6 border-b border-slate-50 flex items-center">
@@ -1138,7 +1160,7 @@ function HomeContent() {
             <span className="font-bold text-lg text-slate-800 ml-2">Dokonaj przedpłaty</span>
           </div>
 
-          <div className="p-8 space-y-8">
+          <div className="p-4 md:p-8 space-y-6 md:space-y-8">
             {/* Nazwa stacji na górze */}
             {stationName && (
               <div className="text-center pb-2">
@@ -1159,14 +1181,14 @@ function HomeContent() {
             </div>
 
             <div className="text-center py-4">
-              <div className="relative inline-flex items-center justify-center">
+              <div className="relative inline-flex items-center justify-center max-w-full">
                 <input
                   type="number"
                   value={amount}
                   onChange={handleAmountChange}
-                  className="text-7xl font-black text-slate-900 text-center w-48 bg-transparent border-b-2 border-slate-200 focus:border-emerald-500 focus:outline-none p-0 pb-2 transition-colors" 
+                  className="text-4xl md:text-7xl font-black text-slate-900 text-center w-32 md:w-48 bg-transparent border-b-2 border-slate-200 focus:border-emerald-500 focus:outline-none p-0 pb-2 transition-colors" 
                 />
-                <span className="text-2xl font-bold text-slate-400 ml-2 mt-4">PLN</span>
+                <span className="text-xl md:text-2xl font-bold text-slate-400 ml-2 mt-2 md:mt-4">PLN</span>
               </div>
               <p className="text-slate-400 font-medium text-sm mt-4">Wpisz kwotę lub użyj suwaka</p>
             </div>
@@ -1257,7 +1279,7 @@ function HomeContent() {
     const remainingAmount = Math.max(0, amount - currentCost);
 
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans text-slate-900">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-4 font-sans text-slate-900">
         <div className="w-full max-w-md bg-white rounded-[2rem] shadow-2xl shadow-slate-200/50 overflow-hidden border border-slate-100">
           
           {/* Header */}
@@ -1398,7 +1420,7 @@ function HomeContent() {
 
   if (viewState === "summary") {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans text-slate-900">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-4 font-sans text-slate-900">
         <div className="w-full max-w-md bg-white rounded-[2rem] shadow-2xl shadow-slate-200/50 p-8 text-center space-y-8 border border-slate-100 animate-in zoom-in-95 duration-300">
           <div className="w-24 h-24 bg-emerald-50 rounded-full flex items-center justify-center mx-auto shadow-inner">
             <CheckCircle2 className="text-emerald-600" size={48} strokeWidth={3} />

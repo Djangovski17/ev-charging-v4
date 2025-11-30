@@ -39,6 +39,28 @@ export default function StationsPage() {
   const [editingStation, setEditingStation] = useState<Station | null>(null);
   const [isUpdatingStation, setIsUpdatingStation] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isCreatingStation, setIsCreatingStation] = useState(false);
+  
+  // Stan formularza dodawania stacji
+  const [newStation, setNewStation] = useState({
+    id: "",
+    name: "",
+    address: "",
+    city: "",
+    latitude: "",
+    longitude: "",
+    status: "AVAILABLE",
+  });
+  
+  // Stan złączy w formularzu
+  const [newConnectors, setNewConnectors] = useState<Array<{
+    name: string;
+    type: string;
+    powerKw: string;
+    pricePerKwh: string;
+    status: string;
+  }>>([]);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
@@ -212,6 +234,131 @@ export default function StationsPage() {
     setEditingStation(null);
   };
 
+  // Funkcje do obsługi modala dodawania stacji
+  const handleAddConnector = () => {
+    setNewConnectors([
+      ...newConnectors,
+      {
+        name: "",
+        type: "Type2",
+        powerKw: "",
+        pricePerKwh: "",
+        status: "AVAILABLE",
+      },
+    ]);
+  };
+
+  const handleRemoveConnector = (index: number) => {
+    setNewConnectors(newConnectors.filter((_, i) => i !== index));
+  };
+
+  const handleConnectorChange = (
+    index: number,
+    field: string,
+    value: string
+  ) => {
+    const updated = [...newConnectors];
+    updated[index] = { ...updated[index], [field]: value };
+    setNewConnectors(updated);
+  };
+
+  const handleAddStationSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Walidacja
+    if (!newStation.id.trim()) {
+      alert("ID stacji jest wymagane");
+      return;
+    }
+
+    if (!newStation.name.trim()) {
+      alert("Nazwa stacji jest wymagana");
+      return;
+    }
+
+    if (newConnectors.length === 0) {
+      alert("Musisz dodać przynajmniej jedno złącze");
+      return;
+    }
+
+    // Walidacja złączy
+    for (let i = 0; i < newConnectors.length; i++) {
+      const connector = newConnectors[i];
+      if (!connector.type) {
+        alert(`Złącze ${i + 1}: Typ jest wymagany`);
+        return;
+      }
+      if (!connector.powerKw || parseFloat(connector.powerKw) <= 0) {
+        alert(`Złącze ${i + 1}: Moc musi być liczbą większą od 0`);
+        return;
+      }
+      if (!connector.pricePerKwh || parseFloat(connector.pricePerKwh) <= 0) {
+        alert(`Złącze ${i + 1}: Cena musi być liczbą większą od 0`);
+        return;
+      }
+      if (!connector.status) {
+        alert(`Złącze ${i + 1}: Status jest wymagany`);
+        return;
+      }
+    }
+
+    setIsCreatingStation(true);
+    try {
+      const payload = {
+        id: newStation.id.trim(),
+        name: newStation.name.trim(),
+        address: newStation.address.trim() || null,
+        city: newStation.city.trim() || null,
+        latitude: newStation.latitude ? parseFloat(newStation.latitude) : null,
+        longitude: newStation.longitude
+          ? parseFloat(newStation.longitude)
+          : null,
+        status: newStation.status,
+        connectors: newConnectors.map((connector) => ({
+          type: connector.type,
+          powerKw: parseInt(connector.powerKw),
+          pricePerKwh: parseFloat(connector.pricePerKwh),
+          status: connector.status,
+          name: connector.name.trim() || undefined,
+        })),
+      };
+
+      await axios.post(`${API_URL}/admin/station`, payload);
+      
+      // Zamknij modal, wyczyść formularz i odśwież listę
+      setIsAddModalOpen(false);
+      resetAddStationForm();
+      await fetchStations();
+    } catch (error: any) {
+      console.error("Error creating station:", error);
+      const errorMessage =
+        error.response?.data?.message ||
+        error.message ||
+        "Błąd podczas tworzenia stacji";
+      alert(errorMessage);
+    } finally {
+      setIsCreatingStation(false);
+    }
+  };
+
+  const resetAddStationForm = () => {
+    setNewStation({
+      id: "",
+      name: "",
+      address: "",
+      city: "",
+      latitude: "",
+      longitude: "",
+      status: "AVAILABLE",
+    });
+    setNewConnectors([]);
+  };
+
+  const handleAddModalClose = () => {
+    setIsAddModalOpen(false);
+    resetAddStationForm();
+  };
+
   const handleStatusChange = async (connectorId: string, newStatus: string) => {
     setUpdatingConnector((prev) => new Set(prev).add(connectorId));
     try {
@@ -280,14 +427,30 @@ export default function StationsPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-slate-900 mb-4">Stacje</h1>
-        <div className="flex justify-center">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Szukaj stacji, adresu, miasta..."
-            className="w-full max-w-lg border border-slate-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-slate-500 focus:border-transparent"
-          />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center mb-6">
+          {/* Lewa kolumna - pusta */}
+          <div></div>
+          
+          {/* Środkowa kolumna - Wyszukiwarka */}
+          <div className="col-start-2 flex justify-center">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Szukaj stacji, adresu, miasta..."
+              className="w-full max-w-lg border border-slate-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-slate-500 focus:border-transparent bg-white"
+            />
+          </div>
+          
+          {/* Prawa kolumna - Przycisk Dodaj */}
+          <div className="flex justify-end">
+            <button
+              onClick={() => setIsAddModalOpen(true)}
+              className="bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 px-6 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              Dodaj
+            </button>
+          </div>
         </div>
       </div>
       {isLoading ? (
@@ -674,9 +837,307 @@ export default function StationsPage() {
         </div>
       )}
       
+      {/* Modal dodawania stacji */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-slate-900">Dodaj nową stację</h2>
+              <button
+                onClick={handleAddModalClose}
+                className="text-slate-500 hover:text-slate-700 text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleAddStationSubmit} className="space-y-6">
+              {/* Sekcja Stacji */}
+              <div className="border-b border-slate-200 pb-6">
+                <h3 className="text-lg font-semibold text-slate-900 mb-4">
+                  Dane stacji
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      ID <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newStation.id}
+                      onChange={(e) =>
+                        setNewStation({ ...newStation, id: e.target.value })
+                      }
+                      required
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                      placeholder="np. ST001"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      Nazwa <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newStation.name}
+                      onChange={(e) =>
+                        setNewStation({ ...newStation, name: e.target.value })
+                      }
+                      required
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                      placeholder="np. Stacja Centrum"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      Adres
+                    </label>
+                    <input
+                      type="text"
+                      value={newStation.address}
+                      onChange={(e) =>
+                        setNewStation({ ...newStation, address: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                      placeholder="np. ul. Przykładowa 123"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      Miasto
+                    </label>
+                    <input
+                      type="text"
+                      value={newStation.city}
+                      onChange={(e) =>
+                        setNewStation({ ...newStation, city: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                      placeholder="np. Warszawa"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      Latitude
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={newStation.latitude}
+                      onChange={(e) =>
+                        setNewStation({ ...newStation, latitude: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                      placeholder="np. 52.2297"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      Longitude
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={newStation.longitude}
+                      onChange={(e) =>
+                        setNewStation({ ...newStation, longitude: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                      placeholder="np. 21.0122"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      Status <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={newStation.status}
+                      onChange={(e) =>
+                        setNewStation({ ...newStation, status: e.target.value })
+                      }
+                      required
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
+                    >
+                      <option value="AVAILABLE">Dostępna</option>
+                      <option value="UNAVAILABLE">Niedostępna</option>
+                      <option value="FAULTED">Awaria</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sekcja Złączy */}
+              <div>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold text-slate-900">
+                    Złącza ({newConnectors.length})
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={handleAddConnector}
+                    className="text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 px-3 py-1 rounded border border-slate-300 transition-colors"
+                  >
+                    + Dodaj złącze
+                  </button>
+                </div>
+
+                {newConnectors.length === 0 ? (
+                  <p className="text-sm text-slate-500 italic">
+                    Kliknij "Dodaj złącze" aby dodać pierwsze złącze
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    {newConnectors.map((connector, index) => (
+                      <div
+                        key={index}
+                        className="border border-slate-200 rounded-lg p-4 bg-slate-50"
+                      >
+                        <div className="flex justify-between items-center mb-3">
+                          <h4 className="text-sm font-semibold text-slate-700">
+                            Złącze {index + 1}
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveConnector(index)}
+                            className="text-red-600 hover:text-red-800 text-sm"
+                          >
+                            Usuń
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                              Nazwa/ID
+                            </label>
+                            <input
+                              type="text"
+                              value={connector.name}
+                              onChange={(e) =>
+                                handleConnectorChange(index, "name", e.target.value)
+                              }
+                              className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-slate-500"
+                              placeholder="np. 1"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                              Typ <span className="text-red-500">*</span>
+                            </label>
+                            <select
+                              value={connector.type}
+                              onChange={(e) =>
+                                handleConnectorChange(index, "type", e.target.value)
+                              }
+                              required
+                              className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-slate-500"
+                            >
+                              <option value="CCS">CCS</option>
+                              <option value="Type2">Type2</option>
+                              <option value="CHAdeMO">CHAdeMO</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                              Moc (kW) <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                              type="number"
+                              step="1"
+                              min="1"
+                              value={connector.powerKw}
+                              onChange={(e) =>
+                                handleConnectorChange(
+                                  index,
+                                  "powerKw",
+                                  e.target.value
+                                )
+                              }
+                              required
+                              className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-slate-500"
+                              placeholder="np. 22"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                              Cena (zł/kWh) <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.01"
+                              value={connector.pricePerKwh}
+                              onChange={(e) =>
+                                handleConnectorChange(
+                                  index,
+                                  "pricePerKwh",
+                                  e.target.value
+                                )
+                              }
+                              required
+                              className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-slate-500"
+                              placeholder="np. 2.50"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                              Status <span className="text-red-500">*</span>
+                            </label>
+                            <select
+                              value={connector.status}
+                              onChange={(e) =>
+                                handleConnectorChange(
+                                  index,
+                                  "status",
+                                  e.target.value
+                                )
+                              }
+                              required
+                              className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-slate-500"
+                            >
+                              <option value="AVAILABLE">Dostępne</option>
+                              <option value="UNAVAILABLE">Niedostępne</option>
+                              <option value="FAULTED">Awaria</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Stopka z przyciskami */}
+              <div className="flex gap-4 pt-4 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={handleAddModalClose}
+                  disabled={isCreatingStation}
+                  className="flex-1 px-4 py-2 border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 font-medium"
+                >
+                  Anuluj
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingStation}
+                  className="flex-1 px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
+                >
+                  {isCreatingStation ? "Zapisywanie..." : "Zapisz"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Modal edycji stacji */}
       {editingStation && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-slate-900">Edytuj stację</h2>

@@ -70,7 +70,16 @@ export const getStations = async (_req: Request, res: Response): Promise<void> =
 
 export const createStation = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id, name, connectorType, pricePerKwh, status } = req.body;
+    const { id, name, address, city, latitude, longitude, status, connectors } = req.body;
+
+    // Walidacja wymaganych pól stacji
+    if (!id || typeof id !== 'string') {
+      res.status(400).json({
+        error: 'Invalid request',
+        message: 'id is required and must be a string',
+      });
+      return;
+    }
 
     if (!name || typeof name !== 'string') {
       res.status(400).json({
@@ -80,52 +89,144 @@ export const createStation = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    if (!connectorType || typeof connectorType !== 'string') {
+    if (!status || typeof status !== 'string') {
       res.status(400).json({
         error: 'Invalid request',
-        message: 'connectorType is required and must be a string',
+        message: 'status is required and must be a string',
       });
       return;
     }
 
-    if (!pricePerKwh || typeof pricePerKwh !== 'number') {
+    // Walidacja tablicy złączy
+    if (!connectors || !Array.isArray(connectors) || connectors.length === 0) {
       res.status(400).json({
         error: 'Invalid request',
-        message: 'pricePerKwh is required and must be a number',
+        message: 'connectors is required and must be a non-empty array',
       });
       return;
     }
 
-    if (pricePerKwh <= 0) {
+    // Sprawdź czy stacja o takim ID już istnieje
+    const existingStation = await prisma.station.findUnique({
+      where: { id },
+    });
+
+    if (existingStation) {
       res.status(400).json({
-        error: 'Invalid request',
-        message: 'pricePerKwh must be greater than 0',
+        error: 'Station already exists',
+        message: 'A station with this ID already exists',
       });
       return;
     }
 
-    logInfo('[Admin] Creating new station', { id, name, connectorType, pricePerKwh });
+    // Konwersja typów dla latitude i longitude (mogą przyjść jako string)
+    let latitudeNum: number | null = null;
+    let longitudeNum: number | null = null;
 
+    if (latitude !== undefined && latitude !== null) {
+      latitudeNum = typeof latitude === 'string' ? parseFloat(latitude) : latitude;
+      if (isNaN(latitudeNum)) {
+        res.status(400).json({
+          error: 'Invalid request',
+          message: 'latitude must be a valid number',
+        });
+        return;
+      }
+    }
+
+    if (longitude !== undefined && longitude !== null) {
+      longitudeNum = typeof longitude === 'string' ? parseFloat(longitude) : longitude;
+      if (isNaN(longitudeNum)) {
+        res.status(400).json({
+          error: 'Invalid request',
+          message: 'longitude must be a valid number',
+        });
+        return;
+      }
+    }
+
+    // Walidacja i przygotowanie danych złączy
+    const connectorsData = connectors.map((connector: any, index: number) => {
+      if (!connector.type || typeof connector.type !== 'string') {
+        throw new Error(`connector[${index}].type is required and must be a string`);
+      }
+
+      if (!connector.powerKw || typeof connector.powerKw !== 'number') {
+        throw new Error(`connector[${index}].powerKw is required and must be a number`);
+      }
+
+      if (connector.powerKw <= 0 || !Number.isInteger(connector.powerKw)) {
+        throw new Error(`connector[${index}].powerKw must be a positive integer`);
+      }
+
+      if (!connector.pricePerKwh || typeof connector.pricePerKwh !== 'number') {
+        throw new Error(`connector[${index}].pricePerKwh is required and must be a number`);
+      }
+
+      if (connector.pricePerKwh <= 0) {
+        throw new Error(`connector[${index}].pricePerKwh must be greater than 0`);
+      }
+
+      if (!connector.status || typeof connector.status !== 'string') {
+        throw new Error(`connector[${index}].status is required and must be a string`);
+      }
+
+      return {
+        type: connector.type,
+        powerKw: connector.powerKw,
+        pricePerKwh: connector.pricePerKwh,
+        status: connector.status,
+        // name nie jest w schemacie Connector, więc pomijamy
+      };
+    });
+
+    // Przygotowanie danych stacji
+    // Uwaga: schema wymaga connectorType i pricePerKwh, więc użyjemy wartości z pierwszego złącza lub domyślnych
     const stationData: {
+      id: string;
       name: string;
+      status: string;
       connectorType: string;
       pricePerKwh: number;
-      status: string;
-      id?: string;
+      address?: string | null;
+      city?: string | null;
+      latitude?: number | null;
+      longitude?: number | null;
+      connectors: {
+        create: Array<{
+          type: string;
+          powerKw: number;
+          pricePerKwh: number;
+          status: string;
+        }>;
+      };
     } = {
+      id,
       name,
-      connectorType,
-      pricePerKwh,
-      status: status || 'AVAILABLE',
+      status,
+      connectorType: connectorsData[0]?.type || 'Type2',
+      pricePerKwh: connectorsData[0]?.pricePerKwh || 2.0,
+      address: address || null,
+      city: city || null,
+      latitude: latitudeNum,
+      longitude: longitudeNum,
+      connectors: {
+        create: connectorsData,
+      },
     };
 
-    // Jeśli ID zostało podane, użyj go (inaczej Prisma wygeneruje UUID)
-    if (id && typeof id === 'string') {
-      stationData.id = id;
-    }
+    logInfo('[Admin] Creating new station with connectors', { 
+      id, 
+      name, 
+      connectorsCount: connectorsData.length 
+    });
 
+    // Utworzenie stacji z złączami w jednej transakcji (nested write)
     const station = await prisma.station.create({
       data: stationData,
+      include: {
+        connectors: true,
+      },
     });
 
     logInfo('[Admin] Station created successfully', { stationId: station.id });
@@ -133,10 +234,19 @@ export const createStation = async (req: Request, res: Response): Promise<void> 
   } catch (error) {
     logError('[Admin] Failed to create station', error);
 
+    // Sprawdź czy to błąd walidacji złączy
+    if (error instanceof Error && error.message.startsWith('connector[')) {
+      res.status(400).json({
+        error: 'Invalid connector data',
+        message: error.message,
+      });
+      return;
+    }
+
     // Sprawdź czy to błąd duplikacji ID
     if (error instanceof Error && error.message.includes('Unique constraint')) {
-      res.status(409).json({
-        error: 'Duplicate station ID',
+      res.status(400).json({
+        error: 'Station already exists',
         message: 'A station with this ID already exists',
       });
       return;
