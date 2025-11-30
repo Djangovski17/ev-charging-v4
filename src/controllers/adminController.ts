@@ -124,25 +124,27 @@ export const createStation = async (req: Request, res: Response): Promise<void> 
     let longitudeNum: number | null = null;
 
     if (latitude !== undefined && latitude !== null) {
-      latitudeNum = typeof latitude === 'string' ? parseFloat(latitude) : latitude;
-      if (isNaN(latitudeNum)) {
+      const lat = typeof latitude === 'string' ? parseFloat(latitude) : latitude;
+      if (lat === null || isNaN(lat)) {
         res.status(400).json({
           error: 'Invalid request',
           message: 'latitude must be a valid number',
         });
         return;
       }
+      latitudeNum = lat;
     }
 
     if (longitude !== undefined && longitude !== null) {
-      longitudeNum = typeof longitude === 'string' ? parseFloat(longitude) : longitude;
-      if (isNaN(longitudeNum)) {
+      const lng = typeof longitude === 'string' ? parseFloat(longitude) : longitude;
+      if (lng === null || isNaN(lng)) {
         res.status(400).json({
           error: 'Invalid request',
           message: 'longitude must be a valid number',
         });
         return;
       }
+      longitudeNum = lng;
     }
 
     // Walidacja i przygotowanie danych złączy
@@ -427,24 +429,25 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
 
     completedTransactions.forEach((transaction) => {
       // Oblicz revenue: użyj finalCost jeśli dostępne, w przeciwnym razie oblicz z energyKwh * pricePerKwh
+      const energyKwh = transaction.energyKwh ?? 0;
       const revenue = transaction.finalCost !== null && transaction.finalCost !== undefined
         ? transaction.finalCost
-        : transaction.energyKwh * transaction.station.pricePerKwh;
+        : energyKwh * transaction.station.pricePerKwh;
       
       totalRevenue += revenue;
-      totalEnergy += transaction.energyKwh || 0;
+      totalEnergy += energyKwh;
 
       // Grupowanie po dniach dla chartData
       const dateKey = new Date(transaction.createdAt).toISOString().split('T')[0];
       const existing = chartDataMap.get(dateKey);
       if (existing) {
         existing.revenue += revenue;
-        existing.energy += transaction.energyKwh || 0;
+        existing.energy += energyKwh;
         existing.sessions += 1;
       } else {
         chartDataMap.set(dateKey, {
           revenue,
-          energy: transaction.energyKwh || 0,
+          energy: energyKwh,
           sessions: 1,
         });
       }
@@ -594,30 +597,36 @@ export const updateStation = async (req: Request, res: Response): Promise<void> 
       updateData.city = city === null || city === '' ? null : String(city);
     }
 
-    if (latitude !== undefined && latitude !== null) {
-      if (typeof latitude !== 'number' || isNaN(latitude)) {
-        res.status(400).json({
-          error: 'Invalid request',
-          message: 'latitude must be a valid number',
-        });
-        return;
+    if (latitude !== undefined) {
+      if (latitude === null) {
+        updateData.latitude = null;
+      } else {
+        const lat = typeof latitude === 'string' ? parseFloat(latitude) : latitude;
+        if (lat === null || isNaN(lat)) {
+          res.status(400).json({
+            error: 'Invalid request',
+            message: 'latitude must be a valid number',
+          });
+          return;
+        }
+        updateData.latitude = lat;
       }
-      updateData.latitude = latitude;
-    } else if (latitude === null) {
-      updateData.latitude = null;
     }
 
-    if (longitude !== undefined && longitude !== null) {
-      if (typeof longitude !== 'number' || isNaN(longitude)) {
-        res.status(400).json({
-          error: 'Invalid request',
-          message: 'longitude must be a valid number',
-        });
-        return;
+    if (longitude !== undefined) {
+      if (longitude === null) {
+        updateData.longitude = null;
+      } else {
+        const lng = typeof longitude === 'string' ? parseFloat(longitude) : longitude;
+        if (lng === null || isNaN(lng)) {
+          res.status(400).json({
+            error: 'Invalid request',
+            message: 'longitude must be a valid number',
+          });
+          return;
+        }
+        updateData.longitude = lng;
       }
-      updateData.longitude = longitude;
-    } else if (longitude === null) {
-      updateData.longitude = null;
     }
 
     logInfo('[Admin] Updating station', { stationId: id, updateData });
@@ -727,6 +736,214 @@ export const updateConnector = async (req: Request, res: Response): Promise<void
 
     res.status(500).json({
       error: 'Failed to update connector',
+      message: error instanceof Error ? error.message : 'An unexpected error occurred',
+    });
+  }
+};
+
+export const deleteStation = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      res.status(400).json({
+        error: 'Invalid request',
+        message: 'Station ID is required',
+      });
+      return;
+    }
+
+    logInfo('[Admin] Deleting station', { stationId: id });
+
+    // Sprawdź czy stacja istnieje
+    const station = await prisma.station.findUnique({
+      where: { id },
+      include: {
+        connectors: true,
+        transactions: true,
+      },
+    });
+
+    if (!station) {
+      res.status(404).json({
+        error: 'Station not found',
+        message: 'The station with the provided ID does not exist',
+      });
+      return;
+    }
+
+    // Usuń stację wraz z złączami i transakcjami w transakcji
+    await prisma.$transaction(async (tx) => {
+      // Najpierw usuń wszystkie transakcje związane ze stacją
+      await tx.transaction.deleteMany({
+        where: { stationId: id },
+      });
+
+      // Następnie usuń wszystkie złącza stacji
+      await tx.connector.deleteMany({
+        where: { stationId: id },
+      });
+
+      // Na końcu usuń stację
+      await tx.station.delete({
+        where: { id },
+      });
+    });
+
+    logInfo('[Admin] Station deleted successfully', { stationId: id });
+    res.status(200).json({
+      message: 'Station deleted successfully',
+      stationId: id,
+    });
+  } catch (error) {
+    logError('[Admin] Failed to delete station', error);
+    res.status(500).json({
+      error: 'Failed to delete station',
+      message: error instanceof Error ? error.message : 'An unexpected error occurred',
+    });
+  }
+};
+
+export const deleteConnector = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      res.status(400).json({
+        error: 'Invalid request',
+        message: 'Connector ID is required',
+      });
+      return;
+    }
+
+    logInfo('[Admin] Deleting connector', { connectorId: id });
+
+    // Sprawdź czy złącze istnieje
+    const connector = await prisma.connector.findUnique({
+      where: { id },
+      include: {
+        transactions: true,
+      },
+    });
+
+    if (!connector) {
+      res.status(404).json({
+        error: 'Connector not found',
+        message: 'The connector with the provided ID does not exist',
+      });
+      return;
+    }
+
+    // Usuń złącze wraz z transakcjami w transakcji
+    await prisma.$transaction(async (tx) => {
+      // Najpierw usuń wszystkie transakcje związane z złączem
+      await tx.transaction.deleteMany({
+        where: { connectorId: id },
+      });
+
+      // Następnie usuń złącze
+      await tx.connector.delete({
+        where: { id },
+      });
+    });
+
+    logInfo('[Admin] Connector deleted successfully', { connectorId: id });
+    res.status(200).json({
+      message: 'Connector deleted successfully',
+      connectorId: id,
+    });
+  } catch (error) {
+    logError('[Admin] Failed to delete connector', error);
+    res.status(500).json({
+      error: 'Failed to delete connector',
+      message: error instanceof Error ? error.message : 'An unexpected error occurred',
+    });
+  }
+};
+
+export const createConnector = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { stationId, type, powerKw, pricePerKwh, status } = req.body;
+
+    // Walidacja wymaganych pól
+    if (!stationId || typeof stationId !== 'string') {
+      res.status(400).json({
+        error: 'Invalid request',
+        message: 'stationId is required and must be a string',
+      });
+      return;
+    }
+
+    if (!type || typeof type !== 'string') {
+      res.status(400).json({
+        error: 'Invalid request',
+        message: 'type is required and must be a string',
+      });
+      return;
+    }
+
+    if (!powerKw || typeof powerKw !== 'number') {
+      res.status(400).json({
+        error: 'Invalid request',
+        message: 'powerKw is required and must be a number',
+      });
+      return;
+    }
+
+    if (powerKw <= 0 || !Number.isInteger(powerKw)) {
+      res.status(400).json({
+        error: 'Invalid request',
+        message: 'powerKw must be a positive integer',
+      });
+      return;
+    }
+
+    if (!pricePerKwh || typeof pricePerKwh !== 'number') {
+      res.status(400).json({
+        error: 'Invalid request',
+        message: 'pricePerKwh is required and must be a number',
+      });
+      return;
+    }
+
+    if (pricePerKwh <= 0) {
+      res.status(400).json({
+        error: 'Invalid request',
+        message: 'pricePerKwh must be greater than 0',
+      });
+      return;
+    }
+
+    // Sprawdź czy stacja istnieje
+    const station = await prisma.station.findUnique({
+      where: { id: stationId },
+    });
+
+    if (!station) {
+      res.status(404).json({
+        error: 'Station not found',
+        message: 'The station with the provided ID does not exist',
+      });
+      return;
+    }
+
+    // Utwórz złącze
+    const connector = await prisma.connector.create({
+      data: {
+        stationId,
+        type,
+        powerKw,
+        pricePerKwh,
+        status: status || 'AVAILABLE',
+      },
+    });
+
+    logInfo('[Admin] Connector created successfully', { connectorId: connector.id, stationId });
+    res.status(201).json(connector);
+  } catch (error) {
+    logError('[Admin] Failed to create connector', error);
+    res.status(500).json({
+      error: 'Failed to create connector',
       message: error instanceof Error ? error.message : 'An unexpected error occurred',
     });
   }
